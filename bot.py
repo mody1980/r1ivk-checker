@@ -476,4 +476,9 @@ def run_turbo_scan(combos, state, msg_id):
 
 if __name__ == "__main__":
     print("[+] r1ivk Checker ⚡ is running with Proxy Rotation & Full Library Check...")
-    bot.infinity_polling()
+    while True:
+        try:
+            bot.infinity_polling(timeout=60, long_polling_timeout=30)
+        except Exception as e:
+            print(f"[-] Polling error: {e}")
+            time.sleep(5)
