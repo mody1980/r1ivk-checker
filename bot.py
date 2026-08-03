@@ -41,7 +41,7 @@ def init_db():
 init_db()
 
 def is_user_premium(user_id):
-    if user_id in [123456789]: # استبدلها بأيدي مالك البوت الأساسي
+    if user_id in [123456789]: # Replace with your master admin user ID if needed
         return True
     conn = sqlite3.connect('checker_users.db', check_same_thread=False)
     cursor = conn.cursor()
@@ -64,7 +64,7 @@ scan_lock = threading.Lock()
 
 # =================== AUTO PROXY FETCHER ===================
 def fetch_fresh_proxies():
-    """جلب بروكسيات حية تلقائياً وتحديث ملف البروكسيات"""
+    """Automatically fetch live proxies and update good_proxies.txt"""
     proxy_sources = [
         "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all",
         "https://www.proxyscan.io/download?type=http"
@@ -84,9 +84,8 @@ def fetch_fresh_proxies():
     
     if new_proxies:
         with open("good_proxies.txt", "w", encoding="utf-8") as f:
-            f.write("\n".join(list(set(new_proxies))[:500])) # حفظ حتى 500 بروكسي نشط
+            f.write("\n".join(list(set(new_proxies))[:500])) # Save up to 500 active proxies
 
-# تشغيل جلب البروكسيات تلقائياً في الخلفية كل ساعة
 def background_proxy_updater():
     while True:
         fetch_fresh_proxies()
@@ -94,7 +93,6 @@ def background_proxy_updater():
 
 threading.Thread(target=background_proxy_updater, daemon=True).start()
 
-# تحميل البروكسيات
 PROXIES_LIST = []
 if os.path.exists("good_proxies.txt"):
     with open("good_proxies.txt", "r", encoding="utf-8") as f:
@@ -369,32 +367,32 @@ Games List:"""
 def send_welcome(message):
     add_user_to_db(message.chat.id)
     markup = types.InlineKeyboardMarkup(row_width=1)
-    btn_checker = types.InlineKeyboardButton("🚀 تشغيل فاحص ريفك (r1ivk Checker)", callback_data="start_checker")
-    btn_status = types.InlineKeyboardButton("📊 حالة الاشتراك والحدود", callback_data="check_status")
-    btn_channel = types.InlineKeyboardButton("📢 قناة التجمعات والتبليغات", url=f"https://t.me/{OWNER_USERNAME.replace('@','')}")
-    btn_buy = types.InlineKeyboardButton("💎 شراء نسخة بريميم (15$ / 30 يوم)", url=f"https://t.me/{OWNER_USERNAME.replace('@','')}")
+    btn_checker = types.InlineKeyboardButton("🚀 Start r1ivk Checker", callback_data="start_checker")
+    btn_status = types.InlineKeyboardButton("📊 Account Status & Limits", callback_data="check_status")
+    btn_channel = types.InlineKeyboardButton("📢 Official Channel", url=f"https://t.me/{OWNER_USERNAME.replace('@','')}")
+    btn_buy = types.InlineKeyboardButton("💎 Buy Premium (15$ / 30 Days)", url=f"https://t.me/{OWNER_USERNAME.replace('@','')}")
     
     markup.add(btn_checker, btn_status, btn_channel, btn_buy)
     
     welcome_text = (
-        "👑 *مرحباً بك في لوحة تحكم r1ivk Checker الرسمية (Ultimate)* ⚡\n\n"
-        "الأداة الأسرع والأقوى لفحص حسابات إكس بوكس ومايكروسوفت مع تحديث البروكسيات تلقائياً ودعم قاعدة البيانات.\n\n"
-        "📌 *اختر أحد الخيارات أدناه للبدء:*"
+        "👑 *Welcome to r1ivk Checker Official Panel (Ultimate)* ⚡\n\n"
+        "The fastest and most powerful tool for checking Xbox and Microsoft accounts with auto-proxy fetching and database support.\n\n"
+        "📌 *Choose an option below to get started:*"
     )
     bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data == "start_checker")
 def callback_checker(call):
-    bot.answer_callback_query(call.id, "جاري فتح نافذة الفاحص...")
+    bot.answer_callback_query(call.id, "Opening checker interface...")
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("❌ إلغاء والعودة للقائمة", callback_data="back_home"))
+    markup.add(types.InlineKeyboardButton("❌ Cancel & Return Home", callback_data="back_home"))
     
     text = (
-        "🚀 *تم تفعيل وضع الفحص المباشر (Ultimate Engine)*\n\n"
-        "📁 أرسل ملف الكومبو الآن بصيغة (`.txt`) وبداخل كل سطر:\n"
+        "🚀 *Live Checker Mode Activated (Ultimate Engine)*\n\n"
+        "📁 Please send your combo file now in (`.txt`) format where each line is:\n"
         "`email:password`\n\n"
-        "📌 *ملاحظة:* النسخة المجانية تدعم حتى **10,000 سطر** كحد أقصى.\n"
-        "💎 لرفع الحظر وفحص ملفات غير محدودة، تواصل مع المالك: {OWNER_USERNAME}"
+        "📌 *Note:* Free version supports up to **10,000 lines** max.\n"
+        "💎 To remove limits and unlock unlimited lines, contact owner: {OWNER_USERNAME}"
     ).format(OWNER_USERNAME=OWNER_USERNAME)
     
     bot.edit_message_text(text, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=markup)
@@ -403,13 +401,13 @@ def callback_checker(call):
 def callback_status(call):
     chat_id = call.message.chat.id
     is_prem = is_user_premium(chat_id)
-    status_text = "💎 بريميم (غير محدود)" if is_prem else "👤 مجاني (بحد أقصى 10,000 سطر)"
+    status_text = "💎 Premium (Unlimited)" if is_prem else "👤 Free (Max 10,000 lines)"
     
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🔙 العودة للقائمة الرئيسية", callback_data="back_home"))
+    markup.add(types.InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_home"))
     
     bot.answer_callback_query(call.id)
-    bot.edit_message_text(f"📊 *معلومات حسابك:*\n\n• معرفك (ID): `{chat_id}`\n• نوع الحساب: *{status_text}*", chat_id=chat_id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=markup)
+    bot.edit_message_text(f"📊 *Your Account Info:*\n\n• User ID: `{chat_id}`\n• Account Type: *{status_text}*", chat_id=chat_id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data in ["cancel_scan", "refresh_stats", "back_home"])
 def handle_callbacks(call):
@@ -417,25 +415,25 @@ def handle_callbacks(call):
     if call.data == "cancel_scan":
         if chat_id in active_scans:
             active_scans[chat_id]['is_running'] = False
-        bot.answer_callback_query(call.id, "تم إيقاف الفحص.")
-        bot.edit_message_text("❌ *تم إيقاف الفحص يدوياً بواسطة المستخدم.*", chat_id=chat_id, message_id=call.message.message_id, parse_mode="Markdown")
+        bot.answer_callback_query(call.id, "Scan stopped.")
+        bot.edit_message_text("❌ *Scan stopped manually by user.*", chat_id=chat_id, message_id=call.message.message_id, parse_mode="Markdown")
     elif call.data == "refresh_stats":
-        bot.answer_callback_query(call.id, "تم تحديث الإحصائيات!")
+        bot.answer_callback_query(call.id, "Stats refreshed!")
     elif call.data == "back_home":
-        bot.answer_callback_query(call.id, "العودة للرئيسية")
+        bot.answer_callback_query(call.id, "Returning home...")
         markup = types.InlineKeyboardMarkup(row_width=1)
         markup.add(
-            types.InlineKeyboardButton("🚀 تشغيل فاحص ريفك (r1ivk Checker)", callback_data="start_checker"),
-            types.InlineKeyboardButton("📊 حالة الاشتراك والحدود", callback_data="check_status"),
-            types.InlineKeyboardButton("📢 قناة التجمعات والتبليغات", url=f"https://t.me/{OWNER_USERNAME.replace('@','')}")
+            types.InlineKeyboardButton("🚀 Start r1ivk Checker", callback_data="start_checker"),
+            types.InlineKeyboardButton("📊 Account Status & Limits", callback_data="check_status"),
+            types.InlineKeyboardButton("📢 Official Channel", url=f"https://t.me/{OWNER_USERNAME.replace('@','')}")
         )
-        bot.edit_message_text("👑 *مرحباً بك من جديد في لوحة التحكم الرئيسية:*", chat_id=chat_id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=markup)
+        bot.edit_message_text("👑 *Welcome back to the main menu:*", chat_id=chat_id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=markup)
 
 @bot.message_handler(content_types=['document'])
 def handle_file(message):
     chat_id = message.chat.id
     if not message.document.file_name.endswith('.txt'):
-        bot.send_message(chat_id, "⚠️ عذراً، يجب إرسال ملف نصي بصيغة `.txt` فقط!")
+        bot.send_message(chat_id, "⚠️ Error: Please send a text file with a `.txt` extension only!")
         return
 
     is_prem = is_user_premium(chat_id)
@@ -452,21 +450,21 @@ def handle_file(message):
             combos = [line.strip() for line in f if ':' in line]
 
         if not combos:
-            bot.send_message(chat_id, "⚠️ الملف فارغ أو الصيغة غير صحيحة!")
+            bot.send_message(chat_id, "⚠️ The file is empty or formatting is incorrect!")
             return
 
         unique_combos = list(dict.fromkeys(combos))
 
         if not is_prem and len(unique_combos) > 10000:
-            bot.send_message(chat_id, f"⚠️ *تم تجاوز الحد المسموح!*\nملفك يحتوي على {len(unique_combos)} سطر.\nالنسخة المجانية تدعم حتى **10,000 سطر**.\n\nلترقية حسابك تواصل مع المالك: {OWNER_USERNAME} (15$ / 30 يوم)", parse_mode="Markdown")
+            bot.send_message(chat_id, f"⚠️ *Limit Exceeded!*\nYour file contains {len(unique_combos)} lines.\nFree version supports up to **10,000 lines**.\n\nTo upgrade your account, contact: {OWNER_USERNAME} (15$ / 30 Days)", parse_mode="Markdown")
             return
 
         markup = types.InlineKeyboardMarkup()
-        markup.row(types.InlineKeyboardButton("🛑 إيقاف الفحص", callback_data="cancel_scan"))
-        markup.row(types.InlineKeyboardButton("🔄 تحديث مباشر", callback_data="refresh_stats"))
-        markup.row(types.InlineKeyboardButton("🔙 القائمة الرئيسية", callback_data="back_home"))
+        markup.row(types.InlineKeyboardButton("🛑 Stop Scan", callback_data="cancel_scan"))
+        markup.row(types.InlineKeyboardButton("🔄 Refresh Stats", callback_data="refresh_stats"))
+        markup.row(types.InlineKeyboardButton("🔙 Main Menu", callback_data="back_home"))
 
-        status_msg = bot.send_message(chat_id, "🔥 *جاري تحضير وبدء الفحص المباشر (مع البروكسيات التلقائية)...*", parse_mode="Markdown", reply_markup=markup)
+        status_msg = bot.send_message(chat_id, "🔥 *Preparing and starting live scan (with Auto-Proxies)...*", parse_mode="Markdown", reply_markup=markup)
 
         user_state = {
             'chat_id': chat_id,
@@ -487,7 +485,7 @@ def handle_file(message):
         threading.Thread(target=run_turbo_scan, args=(unique_combos, user_state, status_msg.message_id), daemon=True).start()
 
     except Exception as e:
-        bot.send_message(chat_id, f"❌ حدث خطأ أثناء معالجة الملف: {e}")
+        bot.send_message(chat_id, f"❌ Error processing file: {e}")
 
 def update_stats_loop(chat_id, msg_id, state):
     while state['is_running'] and state['checked'] < state['total']:
@@ -499,30 +497,30 @@ def update_stats_loop(chat_id, msg_id, state):
         filled = int(pct / 10)
         bar = "█" * filled + "░" * (10 - filled)
 
-        text = f"""🔥 *لوحة إحصائيات الفحص المباشر ({time.strftime('%H:%M:%S')})*
+        text = f"""🔥 *Live Scan Statistics Dashboard ({time.strftime('%H:%M:%S')})*
 
-📊 *الإجمالي:*         {state['total']}
-✓ *تم فحصهم:*    {state['checked']}
-✗ *غير مصيب (Bad):* {state['bad']}
-★ *الصيد (Hits):*    {state['hits']}
-🔒 *تحقق (2FA):*     {state['twofa']}
-⚠ *أخطاء:*          {state['errors']}
+📊 *Total:*         {state['total']}
+✓ *Checked:*     {state['checked']}
+✗ *Bad:*         {state['bad']}
+★ *Hits:*        {state['hits']}
+🔒 *2FA / Locked:* {state['twofa']}
+⚠ *Errors:*        {state['errors']}
 
-التقدم: {pct:.1f}%
+Progress: {pct:.1f}%
 \\[{bar}\\]
 
-⚡ *السرعة (CPM):* {cpm}
-⏱️ *الوقت المنقضي:* {time.strftime('%H:%M:%S', time.gmtime(elapsed))}
+⚡ *Speed (CPM):* {cpm}
+⏱️ *Elapsed Time:* {time.strftime('%H:%M:%S', time.gmtime(elapsed))}
 
-🎮 *إحصائيات الألعاب:*
-• صيد ماينكرافت: {state['hits']}
-• صيد إكس بوكس: {state['hits']}"""
+🎮 *Game Stats:*
+• Minecraft Hits: {state['hits']}
+• Xbox Hits: {state['hits']}"""
 
         try:
             markup = types.InlineKeyboardMarkup()
-            markup.row(types.InlineKeyboardButton("🛑 إيقاف الفحص", callback_data="cancel_scan"))
-            markup.row(types.InlineKeyboardButton("🔄 تحديث مباشر", callback_data="refresh_stats"))
-            markup.row(types.InlineKeyboardButton("🔙 القائمة الرئيسية", callback_data="back_home"))
+            markup.row(types.InlineKeyboardButton("🛑 Stop Scan", callback_data="cancel_scan"))
+            markup.row(types.InlineKeyboardButton("🔄 Refresh Stats", callback_data="refresh_stats"))
+            markup.row(types.InlineKeyboardButton("🔙 Main Menu", callback_data="back_home"))
             bot.edit_message_text(text, chat_id=chat_id, message_id=msg_id, parse_mode="Markdown", reply_markup=markup)
         except Exception:
             pass
@@ -536,14 +534,14 @@ def run_turbo_scan(combos, state, msg_id):
     state['is_running'] = False
     elapsed = time.time() - state['start_time']
     
-    final_text = f"""✅ *تم الانتهاء من فحص مكتبة الإكس بوكس وجيم باس بالكامل!*
+    final_text = f"""✅ *Xbox Library & GamePass Scan Completed!*
 
-📊 *الإجمالي:*         {state['total']}
-★ *الصيد الناجح:*  {state['hits']}
-🔒 *التحقق الثنائي:* {state['twofa']}
-✗ *الغير صالحة:*     {state['bad']}
+📊 *Total:*         {state['total']}
+★ *Successful Hits:* {state['hits']}
+🔒 *Two-Factor (2FA):* {state['twofa']}
+✗ *Bad Accounts:*    {state['bad']}
 
-⏱️ *الوقت المستغرق:* {time.strftime('%H:%M:%S', time.gmtime(elapsed))}"""
+⏱️ *Time Taken:* {time.strftime('%H:%M:%S', time.gmtime(elapsed))}"""
 
     try:
         bot.edit_message_text(final_text, chat_id=state['chat_id'], message_id=msg_id, parse_mode="Markdown")
@@ -560,13 +558,13 @@ def run_turbo_scan(combos, state, msg_id):
                 f.writelines(state['hits_list'])
             
             with open(result_file_path, 'rb') as f:
-                bot.send_document(state['chat_id'], f, caption=f"📁 *ملف الصيد الناتج (Hits)* (عدد الصيد: {state['hits']})", parse_mode="Markdown")
+                bot.send_document(state['chat_id'], f, caption=f"📁 *Hits Results File* (Total Hits: {state['hits']})", parse_mode="Markdown")
             
             os.remove(result_file_path)
         except Exception as e:
-            bot.send_message(state['chat_id'], f"⚠️ خطأ أثناء إرسال ملف النتائج: {e}")
+            bot.send_message(state['chat_id'], f"⚠️ Error sending results file: {e}")
     else:
-        bot.send_message(state['chat_id'], "⚠️ انتهى الفحص، للأسف لم يتم العثور على صيد مطابق.")
+        bot.send_message(state['chat_id'], "⚠️ Scan finished, no matching hits found.")
 
 if __name__ == "__main__":
     print("[+] r1ivk Checker ⚡ Ultimate Bot is running with Auto-Proxies & Database...")
