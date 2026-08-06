@@ -1,4 +1,4 @@
-```python
+
 # -*- coding: utf-8 -*-
 """
 r1livk Checker ⚡ - Telegram Bot (Full Xbox + Minecraft + GamePass + Owned Games)
