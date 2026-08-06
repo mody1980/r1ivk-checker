@@ -1,4 +1,3 @@
-
 # -*- coding: utf-8 -*-
 """
 r1livk Checker ⚡ - Telegram Bot (Full Xbox + Minecraft + GamePass + Owned Games)
@@ -464,5 +463,3 @@ def process_checker(chat_id, filepath):
 if __name__ == "__main__":
     print("r1livk Full Checker Pro is running...")
     bot.infinity_polling()
-
-```
