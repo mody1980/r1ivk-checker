@@ -107,7 +107,7 @@ def fetch_xbox_extra_details_pro(session, xb_token, uhs):
                     except:
                         pass
 
-            # 3. سحب الألعاب عبر Inventory Entitlements API (الطريقة الفعلية للقيم ليست)
+            # 3. سحب الألعاب عبر Inventory Entitlements API
             if xuid:
                 entitlements_url = f"https://inventory.xboxlive.com/users/xuid({xuid})/inventory/products?type=Game"
                 ent_resp = session.get(entitlements_url, headers=headers, timeout=10)
@@ -128,7 +128,7 @@ def fetch_xbox_extra_details_pro(session, xb_token, uhs):
                             if counter > 20:
                                 break
 
-            # 4. خطة بديلة لو الـ Inventory ما رجع بيانات، نسحب من الـ Title History المتقدم
+            # 4. خطة بديلة لو الـ Inventory ما رجع بيانات
             if not owned_games_formatted and xuid:
                 history_url = f"https://achievements.xboxlive.com/users/xuid({xuid})/history/titles"
                 history_resp = session.get(history_url, headers=headers, timeout=10)
@@ -318,7 +318,7 @@ def send_welcome(message):
     text = (
         "⚡ **r1livk Checker Pro (Catalog Mode)** ⚡\n\n"
         "Welcome to the ultimate account checking bot.\n"
-        "Your Status: 👤 Free (0/10000 lines today)\n\n"
+        "Your Status: 👤 Free (2500 معك)\n\n"
         "Features:\n"
         "• Xbox Game Pass & Subscriptions\n"
         "• DisplayCatalog & Inventory Games List\n"
@@ -362,7 +362,7 @@ def callback_query(call):
         bot.answer_callback_query(call.id, "To buy the premium version, please contact the developer: @r1livk", show_alert=True)
 
     elif call.data == "my_account":
-        bot.answer_callback_query(call.id, "Current Status: Free\nDaily Limit: 10000 lines", show_alert=True)
+        bot.answer_callback_query(call.id, "Current Status: Free\nDaily Limit: 2500 معك", show_alert=True)
 
 @bot.message_handler(content_types=['document'])
 def handle_docs(message):
