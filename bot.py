@@ -19,7 +19,7 @@ from telebot import types
 urllib3.disable_warnings()
 
 TOKEN = "8896382526:AAFMror2dFQ1U0r6RRHrrya2PKuyuoTRtnw"
-OWNER_ID = 6266959915  # <--- تم إضافة الـ ID الخاص بك هنا بنجاح
+OWNER_ID = 6266959915
 bot = telebot.TeleBot(TOKEN)
 
 REQUEST_TIMEOUT = 25
@@ -129,41 +129,8 @@ def fetch_xbox_extra_details_pro(session, xb_token, uhs):
                     except:
                         pass
 
+            # التعديل هنا: اعتماد Achievements History كأولوية أولى لأنه يتجاوز الـ Hidden ويستخرج الألعاب التي تم لعبها والحصول على نقاط منها
             if xuid:
-                entitlements_url = f"https://inventory.xboxlive.com/users/xuid({xuid})/inventory/products?type=Game"
-                ent_resp = session.get(entitlements_url, headers=headers, timeout=10)
-                
-                if ent_resp.status_code == 200:
-                    ent_data = ent_resp.json()
-                    counter = 1
-                    for item in ent_data.get("items", []):
-                        game_name = item.get("name") or item.get("title")
-                        if not game_name and "alternateIds" in item:
-                            for alt in item.get("alternateIds", []):
-                                if alt.get("idType") == "LegacyTitleId":
-                                    game_name = f"Xbox Game ID: {alt.get('value')}"
-                        
-                        if game_name:
-                            owned_games_formatted.append(f"{counter} - {game_name}")
-                            counter += 1
-                            if counter > 20:
-                                break
-
-            # المحاولة البديلة عبر TitleHub لتجاوز الـ Hidden وإحضار الألعاب الفعلية
-            if not owned_games_formatted and xuid:
-                th_url = f"https://titlehub.xboxlive.com/users/xuid({xuid})/titles/batch"
-                th_resp = session.post(th_url, json={"arrangeBy": "lastTimePlayed", "includeAll": True}, headers=headers, timeout=10)
-                if th_resp.status_code == 200:
-                    counter = 1
-                    for title in th_resp.json().get("titles", []):
-                        t_name = title.get("name") or title.get("shortName")
-                        if t_name:
-                            owned_games_formatted.append(f"{counter} - {t_name}")
-                            counter += 1
-                            if counter > 20:
-                                break
-
-            if not owned_games_formatted and xuid:
                 history_url = f"https://achievements.xboxlive.com/users/xuid({xuid})/history/titles"
                 history_resp = session.get(history_url, headers=headers, timeout=10)
                 if history_resp.status_code == 200:
@@ -177,6 +144,20 @@ def fetch_xbox_extra_details_pro(session, xb_token, uhs):
                         
                         if t_name:
                             owned_games_formatted.append(f"{counter} - {t_name} | Score: {earned_gs}G")
+                            counter += 1
+                            if counter > 20:
+                                break
+
+            # إذا لم تجد الإنجازات شيئاً، نجرب الـ TitleHub كبديل ثاني
+            if not owned_games_formatted and xuid:
+                th_url = f"https://titlehub.xboxlive.com/users/xuid({xuid})/titles/batch"
+                th_resp = session.post(th_url, json={"arrangeBy": "lastTimePlayed", "includeAll": True}, headers=headers, timeout=10)
+                if th_resp.status_code == 200:
+                    counter = 1
+                    for title in th_resp.json().get("titles", []):
+                        t_name = title.get("name") or title.get("shortName")
+                        if t_name:
+                            owned_games_formatted.append(f"{counter} - {t_name}")
                             counter += 1
                             if counter > 20:
                                 break
