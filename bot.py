@@ -318,7 +318,7 @@ def send_welcome(message):
     text = (
         "⚡ **r1livk Checker Pro (Catalog Mode)** ⚡\n\n"
         "Welcome to the ultimate account checking bot.\n"
-        "Your Status: 👤 Free (2500 معك)\n\n"
+        "Your Status: 👤 Free (0/2500 lines today)\n\n"
         "Features:\n"
         "• Xbox Game Pass & Subscriptions\n"
         "• DisplayCatalog & Inventory Games List\n"
@@ -362,7 +362,7 @@ def callback_query(call):
         bot.answer_callback_query(call.id, "To buy the premium version, please contact the developer: @r1livk", show_alert=True)
 
     elif call.data == "my_account":
-        bot.answer_callback_query(call.id, "Current Status: Free\nDaily Limit: 2500 معك", show_alert=True)
+        bot.answer_callback_query(call.id, "Current Status: Free\nDaily Limit: 2500 lines", show_alert=True)
 
 @bot.message_handler(content_types=['document'])
 def handle_docs(message):
