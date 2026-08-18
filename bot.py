@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-r1livk Checker ⚡ - Telegram Bot (Original Stealth Edition - No 2FA Files)
+r1livk Checker ⚡ - Telegram Bot (Original Stealth Edition)
 """
 
 import os
