@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-r1livk Checker ⚡ - Telegram Bot (Original Stealth Edition)
+r1livk Checker ⚡ - Telegram Bot (Original Stealth Edition - Optimized)
 """
 
 import os
@@ -60,7 +60,7 @@ def check_user_subscription(user_id):
     return False
 
 REQUEST_TIMEOUT = 25
-MAX_THREADS = 12
+MAX_THREADS = 4  # تم تعديل الثريدز إلى 4 لضمان الاستقرار بدون بروكسيات
 
 active_scans = {}
 user_usage = {}  
@@ -275,7 +275,6 @@ def check_single_account(combo, proxy_list=None):
         login_req = session.post(url_post, data=login_data, headers=headers, proxies=proxy_dict, impersonate="chrome120", allow_redirects=True, timeout=REQUEST_TIMEOUT)
         login_text = login_req.text.lower()
 
-        # حسابات الـ 2FA تُحتسب في العداد فقط بدون حفظ في ملف
         if any(x in login_text for x in ["two-step", "additional security", "identity/confirm?m=", "proofs", "code"]):
             return "2fa", None
 
