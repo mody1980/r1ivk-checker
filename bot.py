@@ -162,19 +162,6 @@ def fetch_xbox_extra_details_pro(session, xb_token, uhs):
                             if counter > 20:
                                 break
 
-            if not owned_games_formatted and xuid:
-                th_url = f"https://titlehub.xboxlive.com/users/xuid({xuid})/titles/batch"
-                th_resp = session.post(th_url, json={"arrangeBy": "lastTimePlayed", "includeAll": True}, headers=headers, timeout=10)
-                if th_resp.status_code == 200:
-                    counter = 1
-                    for title in th_resp.json().get("titles", []):
-                        t_name = title.get("name") or title.get("shortName")
-                        if t_name:
-                            owned_games_formatted.append(f"{counter} - {t_name}")
-                            counter += 1
-                            if counter > 20:
-                                break
-
             return game_pass_status, owned_games_formatted
 
     except Exception:
