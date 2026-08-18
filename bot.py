@@ -20,6 +20,7 @@ urllib3.disable_warnings()
 
 TOKEN = "8896382526:AAFMror2dFQ1U0r6RRHrrya2PKuyuoTRtnw"
 OWNER_ID = 6266959915
+CHANNEL_USERNAME = "@r1iv_k"  # يوزر قناتك الخاص
 bot = telebot.TeleBot(TOKEN)
 
 PREMIUM_USERS_FILE = "premium_users.txt"
@@ -36,6 +37,17 @@ def save_premium_user(user_id):
     with open(PREMIUM_USERS_FILE, "w") as f:
         for uid in users:
             f.write(f"{uid}\n")
+
+def check_user_subscription(user_id):
+    if user_id == OWNER_ID:
+        return True
+    try:
+        member = bot.get_chat_member(CHANNEL_USERNAME, user_id)
+        if member.status in ['member', 'administrator', 'creator']:
+            return True
+    except Exception as e:
+        print(f"Error checking subscription: {e}")
+    return False
 
 REQUEST_TIMEOUT = 25
 MAX_THREADS = 10
@@ -324,15 +336,38 @@ def check_single_account(combo):
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
+    chat_id = message.chat.id
+    
+    # التحقق من اشتراك المستخدم في القناة
+    if not check_user_subscription(chat_id):
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        btn_channel = types.InlineKeyboardButton("📢 اشترك في القناة الآن", url=f"https://t.me/{CHANNEL_USERNAME.replace('@', '')}")
+        btn_check = types.InlineKeyboardButton("🔄 تحقق من الاشتراك", callback_data="check_sub")
+        markup.add(btn_channel, btn_check)
+        
+        bot.send_message(
+            chat_id, 
+            "⚠️ **عذراً، يجب عليك الاشتراك في قناة البوت أولاً لتتمكن من استخدامه!**\n\n"
+            f"القناة: {CHANNEL_USERNAME}\n\n"
+            "بعد الاشتراك، اضغط على زر **(تحقق من الاشتراك)** بالأسفل 👇",
+            parse_mode="Markdown",
+            reply_markup=markup
+        )
+        return
+
+    show_main_menu(message)
+
+def show_main_menu(message):
+    chat_id = message.chat.id if hasattr(message, 'chat') else message.chat.id
+    msg_id = message.message.message_id if hasattr(message, 'message') and hasattr(message.message, 'message_id') else None
+
     markup = types.InlineKeyboardMarkup(row_width=1)
     btn_start = types.InlineKeyboardButton("⚡ Start Checker", callback_data="start_checker")
     btn_premium = types.InlineKeyboardButton("💎 Buy Premium ($15/Month)", callback_data="buy_premium")
     btn_account = types.InlineKeyboardButton("👤 My Account", callback_data="my_account")
     markup.add(btn_start, btn_premium, btn_account)
 
-    chat_id = message.chat.id
     today = date.today()
-    
     if chat_id == OWNER_ID or str(chat_id) in load_premium_users():
         status_text = "👑 Premium / Owner (Unlimited)"
     else:
@@ -343,15 +378,16 @@ def send_welcome(message):
         "⚡ **r1livk Checker Pro (Catalog Mode)** ⚡\n\n"
         "Welcome to the ultimate account checking bot.\n"
         f"Your Status: {status_text}\n\n"
-        "Features:\n"
-        "• Xbox Game Pass & Subscriptions\n"
-        "• DisplayCatalog & Inventory Games List\n"
-        "• Gamertag & Gamerscore\n"
-        "• Minecraft Entitlements\n"
-        "• Anti-2FA Browser Headers\n\n"
         "Click the button below to start checking your combo files!"
     )
-    bot.send_message(message.chat.id, text, parse_mode="Markdown", reply_markup=markup)
+    
+    if msg_id:
+        try:
+            bot.edit_message_text(text, chat_id=chat_id, message_id=msg_id, parse_mode="Markdown", reply_markup=markup)
+            return
+        except:
+            pass
+    bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
 
 @bot.message_handler(commands=['premium'])
 def give_premium(message):
@@ -379,6 +415,20 @@ def give_premium(message):
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
     chat_id = call.message.chat.id
+
+    if call.data == "check_sub":
+        if check_user_subscription(chat_id):
+            bot.answer_callback_query(call.id, "✅ شكراً لاشتراكك! تم فتح البوت بنجاح.", show_alert=True)
+            show_main_menu(call.message)
+        else:
+            bot.answer_callback_query(call.id, "❌ لم تقم بالاشتراك في القناة بعد! الرجاء الاشتراك أولاً.", show_alert=True)
+        return
+
+    # التحقق من الاشتراك لأي زر آخر أيضاً لحماية البوت
+    if not check_user_subscription(chat_id):
+        bot.answer_callback_query(call.id, "⚠️ يجب عليك الاشتراك في القناة أولاً!", show_alert=True)
+        return
+
     if call.data == "start_checker":
         markup = types.InlineKeyboardMarkup()
         btn_cancel = types.InlineKeyboardButton("❌ Cancel", callback_data="cancel_checker")
@@ -399,7 +449,7 @@ def callback_query(call):
     
     elif call.data == "cancel_checker" or call.data == "back_to_menu":
         active_scans[chat_id] = False
-        send_welcome(call.message)
+        show_main_menu(call.message)
 
     elif call.data == "stop_scan":
         active_scans[chat_id] = False
@@ -419,6 +469,11 @@ def callback_query(call):
 @bot.message_handler(content_types=['document'])
 def handle_docs(message):
     chat_id = message.chat.id
+    
+    if not check_user_subscription(chat_id):
+        bot.reply_to(message, f"⚠️ يجب عليك الاشتراك في قناة البوت أولاً: {CHANNEL_USERNAME}")
+        return
+
     try:
         file_info = bot.get_file(message.document.file_id)
         downloaded_file = bot.download_file(file_info.file_path)
